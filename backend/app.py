@@ -544,6 +544,10 @@ def simulate(circuit: Circuit) -> dict[str, Any]:
             "shots": circuit.shots,
             "counts": counts,
             "probabilities": probabilities,
+            "statevector": [
+                {"real": round(float(value.real), 8), "imag": round(float(value.imag), 8)}
+                for value in state
+            ],
         }
     except ImportError:
         return {"engine": "unavailable", "probabilities": None, "message": "Install qiskit and qiskit-aer to run Aer simulation."}
@@ -1070,6 +1074,33 @@ def composer(circuit: Circuit) -> dict[str, Any]:
     if errors:
         raise HTTPException(status_code=422, detail=errors)
     return {"qasm": qasm(circuit), "format": "openqasm-2.0", "composer": "Paste the QASM into IBM Quantum Composer to continue editing live."}
+
+
+@app.post("/integrations/transpile")
+def transpile_circuit(circuit: Circuit) -> dict[str, Any]:
+    errors = validate_circuit(circuit)
+    if errors:
+        raise HTTPException(status_code=422, detail=errors)
+    try:
+        from qiskit import transpile as qiskit_transpile
+        from qiskit.qasm2 import dumps
+        qc = build_quantum_circuit(circuit, include_measurements=True)
+        transpiled = qiskit_transpile(qc, basis_gates=["u", "cx"], optimization_level=1)
+        transpiled_qasm = dumps(transpiled)
+        return {
+            "qiskit_code": (
+                "from qiskit import QuantumCircuit, transpile\n\n"
+                f"qc = QuantumCircuit.from_qasm_str({transpiled_qasm!r})\n"
+                "optimized = transpile(qc, basis_gates=['u', 'cx'], optimization_level=1)\n"
+                "optimized.draw('text')"
+            ),
+            "qasm": transpiled_qasm,
+            "original_gate_count": len(circuit.gates),
+            "transpiled_gate_count": len(transpiled.data),
+            "basis_gates": ["u", "cx"],
+        }
+    except (ImportError, KeyError, RuntimeError, ValueError) as error:
+        raise HTTPException(status_code=503, detail=f"Transpilation unavailable: {error}") from error
 
 
 @app.post("/integrations/jupyter")

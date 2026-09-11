@@ -44,6 +44,7 @@ export const api = {
     body: JSON.stringify({ user_id: id, name, circuit }),
   }),
   composer: (circuit) => request("/integrations/composer", { method: "POST", body: JSON.stringify(circuit) }),
+  transpile: (circuit) => request("/integrations/transpile", { method: "POST", body: JSON.stringify(circuit) }),
   jupyter: (user_id, circuit, title = "Quantum learning exercise") => request("/integrations/jupyter", {
     method: "POST",
     body: JSON.stringify({ user_id, circuit, title }),

@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
 import SimulationResults from "../components/circuit/SimulationResults";
+import ProbabilityChart from "../components/circuit/ProbabilityChart";
+import BlochSphere from "../components/circuit/BlochSphere";
 import { api } from "../services/api";
 import { getCurrentUserId } from "../services/user";
 import {
@@ -12,7 +14,7 @@ import {
   getCircuitGroups,
   validateCircuit,
 } from "../services/circuitService";
-import { Atom, Play, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { Atom, Code2, Play, Plus, RotateCcw, Trash2, WandSparkles } from "lucide-react";
 import "./CircuitLab.css";
 
 const GATES = [
@@ -78,6 +80,7 @@ function CircuitLab() {
   const [simulationResult, setSimulationResult] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [transpiled, setTranspiled] = useState(null);
 
   const groups = useMemo(() => getCircuitGroups(circuit), [circuit]);
   const selectedGroup = selectedCell
@@ -258,8 +261,26 @@ function CircuitLab() {
       const payload = createCircuitJSON(circuit);
       window.localStorage.setItem("quantum_last_circuit", JSON.stringify(payload));
       setSimulationResult(await api.simulate(payload));
+      setTranspiled(null);
     } catch (requestError) {
       setSimulationResult(null);
+      setError(requestError.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const transpileCircuit = async () => {
+    const validation = validateCircuit(circuit);
+    if (!validation.valid) {
+      setError(validation.message);
+      return;
+    }
+    setLoading(true);
+    setError("");
+    try {
+      setTranspiled(await api.transpile(createCircuitJSON(circuit)));
+    } catch (requestError) {
       setError(requestError.message);
     } finally {
       setLoading(false);
@@ -309,6 +330,9 @@ function CircuitLab() {
             <Play size={16} /> {loading ? "Simulating..." : "Run Circuit"}
           </button>
           <button type="button" className="clear-button" onClick={exportJupyter}>Export Jupyter</button>
+          <button type="button" className="clear-button" onClick={transpileCircuit} disabled={loading}>
+            <WandSparkles size={15} /> Transpile
+          </button>
         </div>
       </header>
 
@@ -485,6 +509,21 @@ function CircuitLab() {
       </div>
 
       <SimulationResults result={simulationResult} />
+      {simulationResult && (
+        <div className="circuit-visualizations">
+          <ProbabilityChart result={simulationResult} />
+          <BlochSphere result={simulationResult} />
+        </div>
+      )}
+      {transpiled && (
+        <section className="transpilation-panel">
+          <div className="visualization-heading">
+            <div><span className="eyebrow">QISKIT PIPELINE</span><h3><Code2 size={17} /> Transpiled circuit</h3></div>
+            <span className="visualization-meta">{transpiled.original_gate_count} → {transpiled.transpiled_gate_count} gates</span>
+          </div>
+          <pre><code>{transpiled.qiskit_code}</code></pre>
+        </section>
+      )}
     </div>
   );
 }

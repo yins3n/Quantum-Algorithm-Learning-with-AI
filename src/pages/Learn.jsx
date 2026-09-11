@@ -22,6 +22,13 @@ const lessons = [
   },
 ];
 
+const resources = [
+  ["Qiskit Learning Platform", "Structured courses, tutorials, and hands-on quantum learning from the Qiskit community.", "https://quantum.cloud.ibm.com/learning"],
+  ["Quantum Composer", "Experiment visually with gates and compare your circuit intuition with a professional composer.", "https://quantum.cloud.ibm.com/composer"],
+  ["Qiskit documentation", "Use the official API reference and guides while you build runnable circuits.", "https://quantum.cloud.ibm.com/docs"],
+  ["Qiskit Textbook archive", "Review the classic explanations of states, gates, algorithms, and applications.", "https://github.com/Qiskit/textbook"],
+];
+
 function Learn() {
   return (
     <div className="page-stack">
@@ -48,6 +55,19 @@ function Learn() {
           </article>
         ))}
       </div>
+      <section className="resources-section">
+        <div className="section-heading">
+          <div><h2>Official Qiskit resources</h2><p>Continue with the source material behind the tools in this lab.</p></div>
+        </div>
+        <div className="resource-grid">
+          {resources.map(([title, summary, url]) => (
+            <a className="resource-card" href={url} target="_blank" rel="noreferrer" key={title}>
+              <span className="resource-mark">Q</span>
+              <div><h3>{title}</h3><p>{summary}</p><span className="resource-link">Open resource <ArrowRight size={14} /></span></div>
+            </a>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
