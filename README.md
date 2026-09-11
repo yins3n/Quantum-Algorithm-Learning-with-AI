@@ -1,2 +1,60 @@
-# Quantum-Algorithm-Learning-with-AI
-AI Integrated Quantum Algorithm Learning Platform
+# Quantum Algorithm Learning with AI
+
+This repository now contains a website-ready backend and a terminal shell for an
+adaptive quantum-learning environment.
+
+## Run locally
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+ollama pull granite3.2:8b
+uvicorn backend.app:app --reload
+```
+
+The API is available at `http://localhost:8000/docs`. In another terminal:
+
+```bash
+./quantum_shell.py
+```
+
+The backend uses **Granite 3.2 8B Instruct** through Ollama. Set `OLLAMA_URL`,
+`OLLAMA_MODEL`, and `CORS_ORIGINS` using `.env.example` values when needed.
+
+## Website integration contract
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /tutor` | Adaptive Granite tutor and circuit debugging |
+| `GET /users/{id}` | Learner preferences, skill state, and recent errors |
+| `PUT /users/{id}/preferences` | Persist learning preferences |
+| `POST /evaluate` | Validate submitted code syntax/safety, validate the circuit, and run Qiskit Aer when installed |
+| `POST /integrations/composer` | Convert the circuit to OpenQASM for live Composer editing |
+| `POST /integrations/jupyter` | Return a downloadable `.ipynb` notebook |
+
+The shared circuit format is:
+
+```json
+{
+  "num_qubits": 2,
+  "gates": [
+    {"name": "h", "qubits": [0]},
+    {"name": "cx", "qubits": [0, 1]}
+  ]
+}
+```
+
+The evaluator validates the circuit before simulation. It never treats an LLM
+response as mathematical truth. Qiskit Aer remains the source of simulator
+results, while Granite explains the validated result and helps the learner.
+The current evaluator establishes the CodeChef-style execution contract; a
+curriculum can later add exercise-specific `expected` assertions without
+changing the frontend integration.
+
+## Safety and persistence
+
+Learner preferences and attempt feedback are stored in `data/platform.db`
+(SQLite). AI-generated Python is not executed by the API. The supported gate
+DSL is validated first, which provides a safe foundation for adding isolated
+exercise runners later.
