@@ -31,6 +31,16 @@ def user_prompt(record: dict[str, Any]) -> str:
     return next(message["content"] for message in record["messages"] if message["role"] == "user")
 
 
+def verified_facts(prompt: str) -> str:
+    marker = "VERIFIED_FACTS: "
+    start = prompt.find(marker)
+    if start < 0:
+        return ""
+    start += len(marker)
+    end = prompt.find("\nQUESTION:", start)
+    return prompt[start:] if end < 0 else prompt[start:end]
+
+
 def format_prompt(record: dict[str, Any]) -> str:
     return f"<|system|>\n{SYSTEM_PROMPT}\n<|user|>\n{user_prompt(record)}\n<|assistant|>\n"
 
@@ -62,9 +72,26 @@ def forbidden_claims(text: str, facts: str) -> list[str]:
 def score_response(response: str, facts: str) -> dict[str, Any]:
     parsed = extract_json(response)
     if parsed is None:
-        return {"json_valid": False, "required_fields": False, "unsupported_numbers": [], "score": 0}
+        return {
+            "json_valid": False,
+            "required_fields": False,
+            "unsupported_numbers": [],
+            "repeated_fields": [],
+            "response": response,
+            "score": 0,
+        }
     missing = sorted(REQUIRED_FIELDS - parsed.keys())
     unsupported = forbidden_claims(response, facts)
+    explanation = str(parsed.get("explanation", "")).strip().lower()
+    hint = str(parsed.get("hint", "")).strip().lower()
+    next_step = str(parsed.get("next_step", "")).strip().lower()
+    repeated_fields = []
+    if explanation and explanation == hint:
+        repeated_fields.append("explanation=hint")
+    if explanation and explanation == next_step:
+        repeated_fields.append("explanation=next_step")
+    if hint and hint == next_step:
+        repeated_fields.append("hint=next_step")
     format_score = int(not missing)
     grounding_score = int(not unsupported)
     return {
@@ -72,6 +99,8 @@ def score_response(response: str, facts: str) -> dict[str, Any]:
         "required_fields": not missing,
         "missing_fields": missing,
         "unsupported_numbers": unsupported,
+        "repeated_fields": repeated_fields,
+        "response": response,
         "score": format_score + grounding_score,
     }
 
@@ -127,7 +156,7 @@ def generate_ollama(url: str, model: str, prompts: list[str]) -> list[str]:
 
 def report(name: str, records: list[dict[str, Any]], outputs: list[str]) -> dict[str, Any]:
     results = [
-        score_response(output, user_prompt(record))
+        score_response(output, verified_facts(user_prompt(record)))
         for record, output in zip(records, outputs, strict=True)
     ]
     summary = {
@@ -136,6 +165,7 @@ def report(name: str, records: list[dict[str, Any]], outputs: list[str]) -> dict
         "json_valid_rate": sum(item["json_valid"] for item in results) / len(results),
         "required_fields_rate": sum(item["required_fields"] for item in results) / len(results),
         "grounded_number_rate": sum(not item["unsupported_numbers"] for item in results) / len(results),
+        "non_redundant_rate": sum(not item["repeated_fields"] for item in results) / len(results),
         "mean_score": sum(item["score"] for item in results) / len(results),
         "details": results,
     }

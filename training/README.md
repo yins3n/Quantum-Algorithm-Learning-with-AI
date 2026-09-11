@@ -55,9 +55,11 @@ python training/evaluate_tutors.py \
 ```
 
 If Ollama is unavailable, add `--skip-ollama`. To test only the adapter and
-Ollama model, add `--skip-base`. The report measures JSON validity, required
-fields, and a conservative numeric-grounding signal. Have an expert review
-the detailed outputs before selecting a production model.
+Ollama model, add `--skip-base`. The report measures JSON validity, required fields, a conservative
+numeric-grounding signal, and exact repetition between response fields. It
+also stores each raw response in the detailed results so failures can be
+reviewed. Have an expert review the detailed outputs before selecting a
+production model.
 
 The Granite 8B adapter requires more memory than a 6 GB RTX 3060 can provide
 for a reliable training step, even with 4-bit loading and gradient
