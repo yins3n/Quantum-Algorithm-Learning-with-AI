@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import torch
 from datasets import load_dataset
 from peft import LoraConfig
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, TrainingArguments
@@ -26,20 +27,24 @@ def main() -> None:
     parser.add_argument("--eval", default="training/tutor_eval.jsonl")
     parser.add_argument("--output", default="artifacts/granite-tutor-lora")
     parser.add_argument("--epochs", type=float, default=3)
+    parser.add_argument("--max-seq-length", type=int, default=512)
     args = parser.parse_args()
 
     dataset = load_dataset("json", data_files={"train": args.train, "eval": args.eval})
+    dataset = dataset.map(lambda example: {"text": format_messages(example)})
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     tokenizer.pad_token = tokenizer.eos_token
-    quantization = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_compute_dtype="bfloat16", bnb_4bit_quant_type="nf4")
+    quantization = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_compute_dtype=torch.float16, bnb_4bit_quant_type="nf4")
     model = AutoModelForCausalLM.from_pretrained(args.model, quantization_config=quantization, device_map="auto")
+    model.config.use_cache = False
     trainer = SFTTrainer(
         model=model,
-        processing_class=tokenizer,
+        tokenizer=tokenizer,
         train_dataset=dataset["train"],
         eval_dataset=dataset["eval"],
-        formatting_func=format_messages,
-        peft_config=LoraConfig(r=16, lora_alpha=32, lora_dropout=0.05, target_modules="all-linear", task_type="CAUSAL_LM"),
+        dataset_text_field="text",
+        max_seq_length=args.max_seq_length,
+        peft_config=LoraConfig(r=4, lora_alpha=8, lora_dropout=0.05, target_modules="all-linear", task_type="CAUSAL_LM"),
         args=TrainingArguments(
             output_dir=args.output,
             num_train_epochs=args.epochs,
@@ -48,10 +53,11 @@ def main() -> None:
             gradient_checkpointing=True,
             learning_rate=2e-4,
             logging_steps=1,
-            evaluation_strategy="epoch",
+            eval_strategy="epoch",
             save_strategy="epoch",
             report_to="none",
-            bf16=True,
+            bf16=False,
+            fp16=True,
         ),
     )
     trainer.train()

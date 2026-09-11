@@ -14,6 +14,7 @@ requires several GB of VRAM.
 ```bash
 python3.12 -m venv .venv-training
 source .venv-training/bin/activate
+pip install --index-url https://download.pytorch.org/whl/cu121 torch==2.5.1
 pip install -r training/requirements.txt
 ```
 
@@ -33,6 +34,12 @@ learners, expand it with quantum-expert-reviewed examples and compare it
 against `tutor_eval.jsonl`. A successful training run is not evidence of
 factual correctness; the engine must continue grounding every answer in
 verified evaluator and simulator facts.
+
+The Granite 8B adapter requires more memory than a 6 GB RTX 3060 can provide
+for a reliable training step, even with 4-bit loading and gradient
+checkpointing. Use a GPU with at least 12 GB VRAM (16 GB recommended), or
+enable a cloud GPU runner. The local machine can still run the prompt-tuned
+`quantum-tutor` model through Ollama.
 
 ## Prompt-tuned local model
 
