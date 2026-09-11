@@ -133,6 +133,12 @@ class NotebookRequest(BaseModel):
     title: str = Field(default="Quantum learning exercise", max_length=200)
 
 
+class SavedCircuitRequest(BaseModel):
+    user_id: str = Field(min_length=1, max_length=128)
+    name: str = Field(min_length=1, max_length=120)
+    circuit: Circuit
+
+
 app = FastAPI(title="Quantum Learning Platform", version="0.1.0")
 
 
@@ -328,6 +334,14 @@ def db() -> sqlite3.Connection:
             passed INTEGER NOT NULL,
             feedback TEXT NOT NULL,
             created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS circuits (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            circuit TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
         );
         """
     )
@@ -917,6 +931,46 @@ def get_attempts(user_id: str, authorization: str | None = Header(default=None))
         {"id": row["id"], "passed": bool(row["passed"]), "feedback": json.loads(row["feedback"]), "created_at": row["created_at"]}
         for row in rows
     ]
+
+
+@app.get("/users/{user_id}/circuits")
+def get_circuits(user_id: str, authorization: str | None = Header(default=None)) -> list[dict[str, Any]]:
+    authenticated_user(user_id, authorization)
+    connection = db()
+    rows = connection.execute(
+        "SELECT id, name, circuit, created_at, updated_at FROM circuits WHERE user_id = ? ORDER BY updated_at DESC LIMIT 100",
+        (user_id,),
+    ).fetchall()
+    connection.close()
+    return [
+        {"id": row["id"], "name": row["name"], "circuit": json.loads(row["circuit"]),
+         "created_at": row["created_at"], "updated_at": row["updated_at"]}
+        for row in rows
+    ]
+
+
+@app.post("/users/{user_id}/circuits")
+def save_circuit(
+    user_id: str,
+    request: SavedCircuitRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    if request.user_id != user_id:
+        raise HTTPException(status_code=400, detail="user_id in the path and body must match.")
+    authenticated_user(user_id, authorization)
+    errors = validate_circuit(request.circuit)
+    if errors:
+        raise HTTPException(status_code=422, detail=errors)
+    circuit_id = str(uuid.uuid4())
+    now = utc_now()
+    connection = db()
+    connection.execute(
+        "INSERT INTO circuits VALUES (?, ?, ?, ?, ?, ?)",
+        (circuit_id, user_id, request.name, request.circuit.model_dump_json(), now, now),
+    )
+    connection.commit()
+    connection.close()
+    return {"id": circuit_id, "name": request.name, "circuit": request.circuit.model_dump(), "created_at": now, "updated_at": now}
 
 
 @app.get("/users/{user_id}/tutor-history")

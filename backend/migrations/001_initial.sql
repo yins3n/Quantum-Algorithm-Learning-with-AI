@@ -26,3 +26,12 @@ CREATE TABLE IF NOT EXISTS tutor_history (
     response TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS circuits (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(user_id),
+    name TEXT NOT NULL,
+    circuit TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);

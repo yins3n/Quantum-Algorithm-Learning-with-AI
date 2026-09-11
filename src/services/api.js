@@ -38,6 +38,11 @@ export const api = {
     method: "PUT",
     body: JSON.stringify({ user_id: id, preferences }),
   }),
+  circuits: (id) => request(`/users/${encodeURIComponent(id)}/circuits`),
+  saveCircuit: (id, name, circuit) => request(`/users/${encodeURIComponent(id)}/circuits`, {
+    method: "POST",
+    body: JSON.stringify({ user_id: id, name, circuit }),
+  }),
   composer: (circuit) => request("/integrations/composer", { method: "POST", body: JSON.stringify(circuit) }),
   jupyter: (user_id, circuit, title = "Quantum learning exercise") => request("/integrations/jupyter", {
     method: "POST",
