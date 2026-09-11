@@ -16,9 +16,24 @@ export function getCurrentUserProfile() {
   };
 }
 
-export function saveCurrentUser({ userId, displayName }) {
+export function getAccessToken() {
+  return readStorage("quantum_access_token", "");
+}
+
+export function saveSession({ userId, displayName, accessToken = "" }) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem("quantum_user_id", userId);
   window.localStorage.setItem("quantum_display_name", displayName);
+  if (accessToken) window.localStorage.setItem("quantum_access_token", accessToken);
+  window.dispatchEvent(new CustomEvent("quantum-profile-updated"));
+}
+
+export const saveCurrentUser = saveSession;
+
+export function clearSession() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem("quantum_user_id");
+  window.localStorage.removeItem("quantum_display_name");
+  window.localStorage.removeItem("quantum_access_token");
   window.dispatchEvent(new CustomEvent("quantum-profile-updated"));
 }

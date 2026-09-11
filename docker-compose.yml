@@ -1,0 +1,29 @@
+services:
+  api:
+    build: .
+    ports: ["8000:8000"]
+    environment:
+      QUANTUM_DB: /data/platform.db
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+      USER_ACCESS_MODE: production
+      AUTH_REQUIRED: "true"
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET to a random 32+ character secret}
+      OLLAMA_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-quantum-tutor:latest}
+    volumes: [quantum-data:/data]
+    depends_on: [ollama]
+  frontend:
+    image: node:22-alpine
+    working_dir: /app
+    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0"
+    ports: ["5173:5173"]
+    environment:
+      VITE_QUANTUM_ENGINE_URL: ${VITE_QUANTUM_ENGINE_URL:-http://localhost:8000}
+    volumes: [.:/app]
+  ollama:
+    image: ollama/ollama:latest
+    ports: ["11434:11434"]
+    volumes: [ollama-data:/root/.ollama]
+volumes:
+  quantum-data:
+  ollama-data:

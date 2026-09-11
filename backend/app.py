@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import ast
+import base64
+import hashlib
+import hmac
 import json
+import logging
 import math
 import os
 import re
 import sqlite3
+import time
 import urllib.error
 import urllib.request
 import uuid
@@ -13,8 +18,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from backend.rag import KnowledgeChunk, retrieve
 
@@ -35,6 +41,14 @@ MAX_GATES = 200
 MAX_SHOTS = 10_000
 MAX_CHECKS = 64
 USER_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+JWT_SECRET = os.getenv("JWT_SECRET", "development-only-change-this-secret-32")
+AUTH_REQUIRED = os.getenv("AUTH_REQUIRED", "false").lower() == "true"
+TOKEN_TTL_SECONDS = int(os.getenv("TOKEN_TTL_SECONDS", "3600"))
+RATE_LIMIT_REQUESTS = int(os.getenv("RATE_LIMIT_REQUESTS", "120"))
+RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
+logger = logging.getLogger("quantum_learning")
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper(), format="%(message)s")
+rate_limit_state: dict[str, list[float]] = {}
 
 
 class Gate(BaseModel):
@@ -59,6 +73,18 @@ class Circuit(BaseModel):
 class UserProfile(BaseModel):
     user_id: str = Field(min_length=1, max_length=128)
     preferences: dict[str, Any] = Field(default_factory=dict, max_length=32)
+
+
+class RegistrationRequest(BaseModel):
+    user_id: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=12, max_length=256)
+    display_name: str = Field(min_length=1, max_length=120)
+    preferences: dict[str, Any] = Field(default_factory=dict, max_length=32)
+
+
+class LoginRequest(BaseModel):
+    user_id: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=1, max_length=256)
 
 
 class TutorRequest(BaseModel):
@@ -102,11 +128,100 @@ class ExerciseSubmission(BaseModel):
 
 
 class NotebookRequest(BaseModel):
+    user_id: str = Field(min_length=1, max_length=128)
     circuit: Circuit
     title: str = Field(default="Quantum learning exercise", max_length=200)
 
 
 app = FastAPI(title="Quantum Learning Platform", version="0.1.0")
+
+
+def _b64(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).decode().rstrip("=")
+
+
+def _unb64(value: str) -> bytes:
+    return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+
+
+def hash_password(password: str, salt: bytes | None = None) -> str:
+    salt = salt or os.urandom(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 240_000)
+    return f"pbkdf2_sha256$240000${_b64(salt)}${_b64(digest)}"
+
+
+def verify_password(password: str, stored: str) -> bool:
+    try:
+        algorithm, rounds, salt, digest = stored.split("$")
+        candidate = hashlib.pbkdf2_hmac(
+            algorithm.removeprefix("pbkdf2_"), password.encode(), _unb64(salt), int(rounds)
+        )
+        return hmac.compare_digest(candidate, _unb64(digest))
+    except (ValueError, TypeError):
+        return False
+
+
+def create_token(user_id: str) -> str:
+    if not JWT_SECRET:
+        raise HTTPException(status_code=503, detail="JWT_SECRET is not configured.")
+    header = _b64(json.dumps({"alg": "HS256", "typ": "JWT"}, separators=(",", ":")).encode())
+    payload = _b64(json.dumps({
+        "sub": user_id,
+        "iat": int(time.time()),
+        "exp": int(time.time()) + TOKEN_TTL_SECONDS,
+    }, separators=(",", ":")).encode())
+    unsigned = f"{header}.{payload}"
+    signature = _b64(hmac.new(JWT_SECRET.encode(), unsigned.encode(), hashlib.sha256).digest())
+    return f"{unsigned}.{signature}"
+
+
+def token_user_id(authorization: str | None) -> str | None:
+    if not isinstance(authorization, str) or not authorization.lower().startswith("bearer "):
+        return None
+    try:
+        header, payload, signature = authorization.split(" ", 1)[1].split(".")
+        unsigned = f"{header}.{payload}"
+        expected = _b64(hmac.new(JWT_SECRET.encode(), unsigned.encode(), hashlib.sha256).digest())
+        if not hmac.compare_digest(signature, expected):
+            return None
+        claims = json.loads(_unb64(payload))
+        if int(claims["exp"]) < int(time.time()):
+            return None
+        return claims["sub"] if USER_ID_PATTERN.fullmatch(claims["sub"]) else None
+    except (ValueError, KeyError, TypeError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+
+
+def authenticated_user(user_id: str, authorization: str | None) -> None:
+    token_id = token_user_id(authorization)
+    if token_id:
+        if token_id != user_id:
+            raise HTTPException(status_code=403, detail="The access token does not belong to this user.")
+        return
+    if AUTH_REQUIRED or os.getenv("USER_ACCESS_MODE", "development").lower() != "development":
+        raise HTTPException(status_code=401, detail="A valid access token for this user is required.")
+    authorize_user(user_id)
+
+
+@app.middleware("http")
+async def operational_middleware(request: Request, call_next):
+    started = time.perf_counter()
+    client = request.client.host if request.client else "unknown"
+    now = time.time()
+    recent = [stamp for stamp in rate_limit_state.get(client, []) if now - stamp < RATE_LIMIT_WINDOW_SECONDS]
+    if len(recent) >= RATE_LIMIT_REQUESTS:
+        return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded."})
+    rate_limit_state[client] = [*recent, now]
+    response = await call_next(request)
+    logger.info(json.dumps({
+        "event": "http_request",
+        "method": request.method,
+        "path": request.url.path,
+        "status": response.status_code,
+        "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+        "client": client,
+    }))
+    return response
 cors_origins = [
     origin.strip()
     for origin in os.getenv(
@@ -174,17 +289,36 @@ def authorize_user(user_id: str) -> None:
         )
 
 
+def validate_runtime_configuration() -> None:
+    if os.getenv("USER_ACCESS_MODE", "development").lower() == "production" or AUTH_REQUIRED:
+        if len(JWT_SECRET) < 32 or JWT_SECRET.startswith("development-only"):
+            raise RuntimeError("JWT_SECRET must be at least 32 characters when authentication is required.")
+        if "*" in cors_origins or not cors_origins:
+            raise RuntimeError("Production CORS_ORIGINS must contain explicit origins.")
+    if TOKEN_TTL_SECONDS < 300 or TOKEN_TTL_SECONDS > 86_400:
+        raise RuntimeError("TOKEN_TTL_SECONDS must be between 300 and 86400.")
+
+
+validate_runtime_configuration()
+
+
 def db() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(DB_PATH)
     connection.row_factory = sqlite3.Row
     connection.executescript(
         """
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            version INTEGER PRIMARY KEY,
+            applied_at TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS users (
             user_id TEXT PRIMARY KEY,
             preferences TEXT NOT NULL DEFAULT '{}',
             skills TEXT NOT NULL DEFAULT '{}',
             recent_errors TEXT NOT NULL DEFAULT '[]',
+            password_hash TEXT,
+            display_name TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
@@ -197,6 +331,17 @@ def db() -> sqlite3.Connection:
         );
         """
     )
+    columns = {row["name"] for row in connection.execute("PRAGMA table_info(users)")}
+    if "password_hash" not in columns:
+        connection.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
+    if "display_name" not in columns:
+        connection.execute("ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL DEFAULT ''")
+    if not connection.execute("SELECT 1 FROM schema_migrations WHERE version = 1").fetchone():
+        connection.execute(
+            "INSERT INTO schema_migrations(version, applied_at) VALUES (1, ?)",
+            (utc_now(),),
+        )
+    connection.commit()
     return connection
 
 
@@ -215,10 +360,48 @@ def ensure_user(user_id: str) -> sqlite3.Row:
     return row
 
 
+def register_user(request: RegistrationRequest) -> dict[str, Any]:
+    if not USER_ID_PATTERN.fullmatch(request.user_id):
+        raise HTTPException(status_code=422, detail="user_id contains unsupported characters.")
+    connection = db()
+    try:
+        if connection.execute("SELECT 1 FROM users WHERE user_id = ?", (request.user_id,)).fetchone():
+            raise HTTPException(status_code=409, detail="That user ID is already registered.")
+        now = utc_now()
+        connection.execute(
+            """INSERT INTO users(user_id, preferences, password_hash, display_name, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (
+                request.user_id,
+                json.dumps(request.preferences),
+                hash_password(request.password),
+                request.display_name,
+                now,
+                now,
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    return {"access_token": create_token(request.user_id), "token_type": "bearer", "user": profile(request.user_id)}
+
+
+def login_user(request: LoginRequest) -> dict[str, Any]:
+    connection = db()
+    row = connection.execute(
+        "SELECT password_hash FROM users WHERE user_id = ?", (request.user_id,)
+    ).fetchone()
+    connection.close()
+    if row is None or not row["password_hash"] or not verify_password(request.password, row["password_hash"]):
+        raise HTTPException(status_code=401, detail="Invalid user ID or password.")
+    return {"access_token": create_token(request.user_id), "token_type": "bearer", "user": profile(request.user_id)}
+
+
 def profile(user_id: str) -> dict[str, Any]:
     row = ensure_user(user_id)
     return {
         "user_id": row["user_id"],
+        "display_name": row["display_name"],
         "preferences": json.loads(row["preferences"]),
         "skills": json.loads(row["skills"]),
         "recent_errors": json.loads(row["recent_errors"]),
@@ -248,6 +431,22 @@ def record_attempt(user_id: str, passed: bool, feedback: list[str]) -> None:
     connection.execute(
         "UPDATE users SET skills = ?, recent_errors = ?, updated_at = ? WHERE user_id = ?",
         (json.dumps(skills), json.dumps(recent_errors), utc_now(), user_id),
+    )
+    connection.commit()
+    connection.close()
+
+
+def record_tutor_interaction(user_id: str, message: str, response: TutorResponse) -> None:
+    connection = db()
+    connection.execute(
+        """CREATE TABLE IF NOT EXISTS tutor_history (
+            id TEXT PRIMARY KEY, user_id TEXT NOT NULL, message TEXT NOT NULL,
+            response TEXT NOT NULL, created_at TEXT NOT NULL
+        )"""
+    )
+    connection.execute(
+        "INSERT INTO tutor_history VALUES (?, ?, ?, ?, ?)",
+        (str(uuid.uuid4()), user_id, message, response.model_dump_json(), utc_now()),
     )
     connection.commit()
     connection.close()
@@ -619,6 +818,24 @@ def health() -> dict[str, Any]:
     }
 
 
+@app.post("/auth/register")
+def register(request: RegistrationRequest) -> dict[str, Any]:
+    return register_user(request)
+
+
+@app.post("/auth/login")
+def login(request: LoginRequest) -> dict[str, Any]:
+    return login_user(request)
+
+
+@app.get("/auth/me")
+def me(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    user_id = token_user_id(authorization)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="A valid access token is required.")
+    return profile(user_id)
+
+
 @app.get("/health/ready")
 @app.get("/ready")
 def readiness() -> dict[str, Any]:
@@ -661,37 +878,78 @@ def get_exercise(exercise_id: str) -> Exercise:
 
 
 @app.post("/exercises/{exercise_id}/submit")
-def submit(exercise_id: str, request: ExerciseSubmission) -> dict[str, Any]:
+def submit(
+    exercise_id: str,
+    request: ExerciseSubmission,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
     exercise = EXERCISES.get(exercise_id)
     if exercise is None:
         raise HTTPException(status_code=404, detail="Exercise not found.")
-    authorize_user(request.user_id)
+    authenticated_user(request.user_id, authorization)
     return submit_exercise(exercise, request)
 
 
 @app.get("/users/{user_id}")
-def get_user(user_id: str) -> dict[str, Any]:
-    authorize_user(user_id)
+def get_user(user_id: str, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    authenticated_user(user_id, authorization)
     return profile(user_id)
 
 
 @app.put("/users/{user_id}/preferences")
-def put_preferences(user_id: str, request: UserProfile) -> dict[str, Any]:
+def put_preferences(user_id: str, request: UserProfile, authorization: str | None = Header(default=None)) -> dict[str, Any]:
     if request.user_id != user_id:
         raise HTTPException(status_code=400, detail="user_id in the path and body must match.")
-    authorize_user(user_id)
+    authenticated_user(user_id, authorization)
     return update_profile(user_id, request.preferences)
 
 
+@app.get("/users/{user_id}/attempts")
+def get_attempts(user_id: str, authorization: str | None = Header(default=None)) -> list[dict[str, Any]]:
+    authenticated_user(user_id, authorization)
+    connection = db()
+    rows = connection.execute(
+        "SELECT id, passed, feedback, created_at FROM attempts WHERE user_id = ? ORDER BY created_at DESC LIMIT 100",
+        (user_id,),
+    ).fetchall()
+    connection.close()
+    return [
+        {"id": row["id"], "passed": bool(row["passed"]), "feedback": json.loads(row["feedback"]), "created_at": row["created_at"]}
+        for row in rows
+    ]
+
+
+@app.get("/users/{user_id}/tutor-history")
+def get_tutor_history(user_id: str, authorization: str | None = Header(default=None)) -> list[dict[str, Any]]:
+    authenticated_user(user_id, authorization)
+    connection = db()
+    connection.execute(
+        """CREATE TABLE IF NOT EXISTS tutor_history (
+            id TEXT PRIMARY KEY, user_id TEXT NOT NULL, message TEXT NOT NULL,
+            response TEXT NOT NULL, created_at TEXT NOT NULL
+        )"""
+    )
+    rows = connection.execute(
+        "SELECT id, message, response, created_at FROM tutor_history WHERE user_id = ? ORDER BY created_at DESC LIMIT 50",
+        (user_id,),
+    ).fetchall()
+    connection.close()
+    return [
+        {"id": row["id"], "message": row["message"], "response": json.loads(row["response"]), "created_at": row["created_at"]}
+        for row in rows
+    ]
+
+
 @app.post("/tutor")
-def tutor(request: TutorRequest) -> dict[str, Any]:
-    authorize_user(request.user_id)
+def tutor(request: TutorRequest, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    authenticated_user(request.user_id, authorization)
     learner = profile(request.user_id)
     errors = validate_circuit(request.circuit) if request.circuit else []
     simulation = simulate(request.circuit) if request.circuit and not errors else None
     sources = retrieve(f"{request.message} {' '.join(errors)}")
     fallback = fallback_tutor(errors, simulation, sources)
     answer = call_granite(tutor_context(request, learner, errors, simulation, sources), fallback)
+    record_tutor_interaction(request.user_id, request.message, answer)
     return {
         "answer": answer.model_dump(),
         "validated_errors": errors,
@@ -702,8 +960,8 @@ def tutor(request: TutorRequest) -> dict[str, Any]:
 
 
 @app.post("/evaluate")
-def evaluate(request: EvaluateRequest) -> dict[str, Any]:
-    authorize_user(request.user_id)
+def evaluate(request: EvaluateRequest, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    authenticated_user(request.user_id, authorization)
     errors = validate_circuit(request.circuit)
     if request.source:
         errors.extend(safe_python_check(request.source))
@@ -761,7 +1019,8 @@ def composer(circuit: Circuit) -> dict[str, Any]:
 
 
 @app.post("/integrations/jupyter")
-def jupyter(request: NotebookRequest) -> dict[str, Any]:
+def jupyter(request: NotebookRequest, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    authenticated_user(request.user_id, authorization)
     errors = validate_circuit(request.circuit)
     if errors:
         raise HTTPException(status_code=422, detail=errors)

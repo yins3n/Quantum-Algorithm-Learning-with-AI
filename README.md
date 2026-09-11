@@ -101,13 +101,27 @@ Learner preferences and attempt feedback are stored in `data/platform.db`
 DSL is validated first, which provides a safe foundation for adding isolated
 exercise runners later.
 
-The frontend's registration portal creates a learner profile through
-`PUT /users/{id}/preferences` and stores the selected learner ID locally for
-subsequent tutor and exercise requests. This is intentionally a profile
-onboarding flow, not an authentication system: the backend does not issue
-passwords, sessions, tokens, or other auth claims.
+The registration portal creates an account through `POST /auth/register` and
+stores a signed bearer token locally. Login is available through
+`POST /auth/login`; user-owned profiles, attempts, tutor history, and notebook
+exports require a matching token. Development mode can still use the
+`DEV_USER_IDS` compatibility boundary, but it must not be exposed publicly.
 
 The frontend also provides evaluator-backed progress at `/progress`, passes the
 last Circuit Lab circuit into the tutor workflow, and downloads notebooks from
 `POST /integrations/jupyter`. These features require the API URL configured in
 `VITE_QUANTUM_ENGINE_URL`.
+
+## Production operations
+
+Set `AUTH_REQUIRED=true`, `USER_ACCESS_MODE=production`, and a random
+`JWT_SECRET` of at least 32 characters before public deployment. The API emits
+structured request logs and applies an in-memory rate limit for a single
+prototype instance; use a shared gateway or Redis-backed limiter when scaling
+horizontally.
+
+Run `docker compose up --build` for the API, React frontend, Ollama, and
+persistent volumes. Use `scripts/backup_db.sh` for SQLite backups. SQLite is
+appropriate for a single-instance pilot; use PostgreSQL plus a migration runner
+for multi-instance production. Pull requests run backend tests/compilation and
+frontend tests/lint/build through `.github/workflows/ci.yml`.

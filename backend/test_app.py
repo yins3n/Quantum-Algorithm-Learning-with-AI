@@ -101,6 +101,22 @@ class BackendRemediationTests(unittest.TestCase):
         if health["dependencies"]["database"] == "available" and health["dependencies"]["simulator"] == "available":
             self.assertEqual(backend.readiness()["status"], "ready")
 
+    def test_registration_login_and_token_ownership(self):
+        request = backend.RegistrationRequest(
+            user_id="auth-test-user",
+            password="a-secure-password-123",
+            display_name="Auth Test",
+        )
+        registered = backend.register(request)
+        self.assertEqual(registered["token_type"], "bearer")
+        logged_in = backend.login(
+            backend.LoginRequest(user_id="auth-test-user", password="a-secure-password-123")
+        )
+        self.assertEqual(backend.token_user_id(f"Bearer {logged_in['access_token']}"), "auth-test-user")
+        with self.assertRaises(HTTPException) as raised:
+            backend.authenticated_user("other-user", f"Bearer {logged_in['access_token']}")
+        self.assertEqual(raised.exception.status_code, 403)
+
 
 if __name__ == "__main__":
     unittest.main()

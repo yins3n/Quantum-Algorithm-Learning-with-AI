@@ -11,7 +11,7 @@ function toUserId(value) {
 
 function Registration() {
   const navigate = useNavigate();
-  const [form, setForm] = useState({ displayName: "", userId: "", level: "beginner", goals: "" });
+  const [form, setForm] = useState({ displayName: "", userId: "", password: "", level: "beginner", goals: "" });
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -31,12 +31,16 @@ function Registration() {
     setSaving(true);
     setError("");
     try {
-      await api.updatePreferences(userId, {
+      const session = await api.register({
+        user_id: userId,
+        password: form.password,
         display_name: form.displayName.trim(),
-        experience_level: form.level,
-        learning_goals: form.goals.trim(),
+        preferences: {
+          experience_level: form.level,
+          learning_goals: form.goals.trim(),
+        },
       });
-      saveCurrentUser({ userId, displayName: form.displayName.trim() });
+      saveCurrentUser({ userId, displayName: form.displayName.trim(), accessToken: session.access_token });
       setStatus("Your learning profile is ready.");
       window.setTimeout(() => navigate("/"), 450);
     } catch (requestError) {
@@ -55,7 +59,7 @@ function Registration() {
         <p>Save your preferences so the tutor and exercises can meet you at the right level.</p>
         <div className="registration-note">
           <CheckCircle2 size={17} />
-          <span>This creates a learning profile through the existing preferences API. It is not an authentication or password system.</span>
+          <span>Your account protects your profile, attempts, tutor history, and notebook exports.</span>
         </div>
         <Link className="text-link" to="/">Back to dashboard <ArrowRight size={15} /></Link>
       </div>
@@ -65,7 +69,7 @@ function Registration() {
           <UserRound size={18} />
           <div>
             <h2>Register your workspace</h2>
-            <p>Only learning preferences are stored.</p>
+            <p>Use at least 12 characters for your password.</p>
           </div>
         </div>
 
@@ -75,6 +79,9 @@ function Registration() {
         <label htmlFor="userId">Learner ID</label>
         <input id="userId" name="userId" value={form.userId} onChange={updateField} placeholder="e.g. alex-chen" autoComplete="username" />
         <span className="field-hint">Used only to address your backend learning profile.</span>
+
+        <label htmlFor="password">Password</label>
+        <input id="password" name="password" type="password" value={form.password} onChange={updateField} minLength={12} autoComplete="new-password" />
 
         <label htmlFor="level">Experience level</label>
         <select id="level" name="level" value={form.level} onChange={updateField}>

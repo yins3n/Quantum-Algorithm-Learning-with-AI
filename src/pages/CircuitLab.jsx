@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import SimulationResults from "../components/circuit/SimulationResults";
 import { api } from "../services/api";
+import { getCurrentUserId } from "../services/user";
 import {
   NUMBER_OF_COLUMNS,
   PARAMETRIC_GATES,
@@ -267,7 +268,7 @@ function CircuitLab() {
 
   const exportJupyter = async () => {
     try {
-      const notebook = await api.jupyter(createCircuitJSON(circuit), "Circuit Lab notebook");
+      const notebook = await api.jupyter(getCurrentUserId(), createCircuitJSON(circuit), "Circuit Lab notebook");
       const blob = new Blob([JSON.stringify(notebook, null, 2)], { type: "application/json" });
       const link = document.createElement("a");
       link.href = URL.createObjectURL(blob);
