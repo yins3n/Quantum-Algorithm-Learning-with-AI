@@ -1,0 +1,28 @@
+quantum-platform/
+│
+├── src/
+│   │
+│   ├── components/
+│   │   ├── Navbar.jsx
+│   │   ├── Sidebar.jsx
+│   │   ├── GatePanel.jsx
+│   │   ├── CircuitCanvas.jsx
+│   │   ├── BlochSphere.jsx
+│   │   ├── ProbabilityChart.jsx
+│   │   └── AITutor.jsx
+│   │
+│   ├── pages/
+│   │   ├── Home.jsx
+│   │   ├── Learn.jsx
+│   │   ├── CircuitLab.jsx
+│   │   ├── Challenges.jsx
+│   │   └── Progress.jsx
+│   │
+│   ├── services/
+│   │   └── api.js
+│   │
+│   ├── App.jsx
+│   └── main.jsx
+│
+├── package.json
+└── README.md
