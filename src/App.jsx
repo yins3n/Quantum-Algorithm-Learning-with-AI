@@ -14,6 +14,9 @@ import {
 import Dashboard from "./pages/Dashboard";
 import Learn from "./pages/Learn";
 import CircuitLab from "./pages/CircuitLab";
+import Challenges from "./pages/Challenges";
+import Tutor from "./pages/Tutor";
+import ChallengeDetail from "./pages/ChallengeDetail";
 import "./App.css";
 
 
@@ -124,22 +127,13 @@ function App() {
 
             <Route
               path="/challenges"
-              element={
-                <div>
-                  <h1>Challenges</h1>
-                  <p>Quantum challenges will be here.</p>
-                </div>
-              }
+              element={<Challenges />}
             />
+            <Route path="/challenges/:exerciseId" element={<ChallengeDetail />} />
 
             <Route
               path="/ai-tutor"
-              element={
-                <div>
-                  <h1>AI Tutor</h1>
-                  <p>Your AI quantum tutor will be here.</p>
-                </div>
-              }
+              element={<Tutor />}
             />
 
             <Route

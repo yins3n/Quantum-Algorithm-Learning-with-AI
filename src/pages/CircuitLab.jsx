@@ -1,8 +1,8 @@
 import { useState } from "react";
 import SimulationResults from "../components/circuit/SimulationResults";
+import { api } from "../services/api";
 
 import {
-  NUMBER_OF_QUBITS,
   NUMBER_OF_COLUMNS,
   createEmptyCircuit,
   createCircuitJSON,
@@ -72,6 +72,9 @@ function CircuitLab() {
   const [selectedCell, setSelectedCell] = useState(null);
 
   const [simulationResult, setSimulationResult] = useState(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [pendingCnot, setPendingCnot] = useState(null);
 
 
   /* =========================
@@ -84,8 +87,20 @@ function CircuitLab() {
     if (selectedGate) {
 
       const newCircuit = circuit.map((row) => [...row]);
-
-      newCircuit[qubit][column] = selectedGate;
+      if (selectedGate === "CNOT") {
+        if (!pendingCnot) {
+          newCircuit[qubit][column] = "CNOT";
+          setPendingCnot({ qubit, column });
+        } else if (pendingCnot.column === column && pendingCnot.qubit !== qubit) {
+          newCircuit[qubit][column] = "CNOT";
+          setPendingCnot(null);
+        } else {
+          setError("Place the CNOT control and target in the same column on different qubits.");
+          return;
+        }
+      } else {
+        newCircuit[qubit][column] = selectedGate;
+      }
 
       setCircuit(newCircuit);
 
@@ -128,6 +143,7 @@ function CircuitLab() {
 
     setSelectedCell(null);
     setSelectedGate(null);
+    setPendingCnot(null);
   };
 
 
@@ -144,6 +160,8 @@ function CircuitLab() {
     setSelectedCell(null);
 
     setSimulationResult(null);
+    setError("");
+    setPendingCnot(null);
   };
 
 
@@ -161,7 +179,7 @@ function CircuitLab() {
      RUN CIRCUIT
   ========================= */
 
-  const runCircuit = () => {
+  const runCircuit = async () => {
 
     const circuitJSON = createCircuitJSON(circuit);
 
@@ -169,48 +187,19 @@ function CircuitLab() {
 
     if (!validation.valid) {
 
-      alert(validation.message);
-
+      setError(validation.message);
       return;
     }
-
-    console.log("Quantum Circuit JSON:");
-
-    console.log(
-      JSON.stringify(circuitJSON, null, 2)
-    );
-
-
-    /* =========================
-       TEMPORARY SIMULATION DATA
-
-       This will later be replaced
-       by the real backend response.
-    ========================= */
-
-    const demoResult = {
-
-      probabilities: {
-        "000": 0.5,
-        "111": 0.5,
-      },
-
-      statevector: [
-        "0.7071",
-        "0",
-        "0",
-        "0",
-        "0",
-        "0",
-        "0",
-        "0.7071",
-      ],
-    };
-
-
-    setSimulationResult(demoResult);
-
-    alert("Circuit simulated successfully!");
+    setLoading(true);
+    setError("");
+    try {
+      setSimulationResult(await api.simulate(circuitJSON));
+    } catch (requestError) {
+      setSimulationResult(null);
+      setError(requestError.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
 
@@ -271,13 +260,15 @@ function CircuitLab() {
 
             <Play size={16} />
 
-            Run Circuit
+            {loading ? "Simulating..." : "Run Circuit"}
 
           </button>
 
         </div>
 
       </header>
+
+      {error && <div className="circuit-error" role="alert">{error}</div>}
 
 
       {/* =====================
@@ -430,7 +421,7 @@ function CircuitLab() {
               </span>
 
               <small>
-                {NUMBER_OF_QUBITS} qubits
+                {circuit.length} qubits
               </small>
 
             </div>
@@ -441,7 +432,7 @@ function CircuitLab() {
               <span>
                 Qubits:
                 <strong>
-                  {NUMBER_OF_QUBITS}
+                  {circuit.length}
                 </strong>
               </span>
 
