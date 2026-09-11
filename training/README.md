@@ -36,6 +36,12 @@ comparison and must not be used for training. A successful training run is
 not evidence of factual correctness; the engine must continue grounding every
 answer in verified evaluator and simulator facts.
 
+External dataset provenance and licensing are recorded in
+`training/dataset_manifest.json`. QuantumKatas is a non-commercial
+CC-BY-NC-SA-4.0 source, while Qiskit HumanEval is Apache-2.0. Execute and
+review derived examples before adding them to training, and keep benchmark
+problems held out when measuring generalization.
+
 ## Compare tutor variants
 
 After downloading an adapter from Kaggle, compare the base model, adapter, and

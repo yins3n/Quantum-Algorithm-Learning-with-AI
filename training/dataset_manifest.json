@@ -1,0 +1,70 @@
+{
+  "manifest_version": 1,
+  "purpose": "Track external quantum-computing datasets used as problem sources and evaluation benchmarks for the tutor.",
+  "retrieved_at": "2026-09-11",
+  "policy": {
+    "use_external_data_as": [
+      "verified exercise and circuit problem sources",
+      "held-out evaluation benchmarks",
+      "seeds for expert-reviewed tutoring examples"
+    ],
+    "do_not": [
+      "copy external answers directly into tutor training without review",
+      "use held-out benchmark problems in training",
+      "treat an LLM-generated answer as mathematical ground truth"
+    ],
+    "verification": "Execute circuits and tests with Qiskit/Qiskit Aer before creating VERIFIED_FACTS.",
+    "split_policy": "Split by source problem, not by generated tutoring response, to prevent train/evaluation leakage."
+  },
+  "datasets": [
+    {
+      "id": "qiskit-quantumkatas",
+      "name": "Qiskit QuantumKatas",
+      "repository": "https://github.com/qiskit-community/Qiskit-QuantumKatas",
+      "dataset_path": "https://github.com/qiskit-community/Qiskit-QuantumKatas/tree/main/dataset",
+      "description": "350 quantum-computing tasks across 26 categories, translated from Microsoft's QuantumKatas to Qiskit.",
+      "intended_use": [
+        "generate curriculum-aligned circuit exercises",
+        "create verified incorrect-circuit tutoring cases",
+        "provide topic coverage for training examples"
+      ],
+      "license": {
+        "spdx": "CC-BY-NC-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+        "commercial_use": false,
+        "requirements": [
+          "attribution",
+          "share adaptations under the same license",
+          "do not use the dataset or derivatives for commercial purposes without permission"
+        ]
+      },
+      "citation": "Qiskit community, Qiskit-QuantumKatas; derived in part from Microsoft QuantumKatas.",
+      "status": "approved as a non-commercial source pending expert review of each derived example"
+    },
+    {
+      "id": "qiskit-humaneval",
+      "name": "Qiskit HumanEval",
+      "repository": "https://github.com/qiskit-community/qiskit-human-eval",
+      "dataset_path": "https://github.com/qiskit-community/qiskit-human-eval/tree/main/dataset",
+      "paper": "https://arxiv.org/abs/2406.14712",
+      "description": "151 human-written Qiskit problems with standard and hard prompt variants for execution-based code evaluation.",
+      "intended_use": [
+        "held-out evaluation of Qiskit code generation",
+        "semantic and execution-based regression tests",
+        "expert-reviewed seeds for debugging explanations"
+      ],
+      "license": {
+        "spdx": "Apache-2.0",
+        "url": "https://www.apache.org/licenses/LICENSE-2.0",
+        "commercial_use": true,
+        "requirements": [
+          "include the Apache-2.0 license and required notices when redistributing covered material",
+          "preserve attribution and copyright notices"
+        ]
+      },
+      "citation": "Qiskit community, Qiskit HumanEval: An Evaluation Benchmark For Quantum Code Generative Models, arXiv:2406.14712.",
+      "status": "approved as a benchmark and source of expert-reviewed examples",
+      "split_rule": "Keep selected HumanEval problems completely held out from tutor training when used for final comparison."
+    }
+  ]
+}
