@@ -762,6 +762,167 @@
     gap: 15px;
   }
 
+  /* Composer workbench skin */
+  .circuit-page {
+    margin: -30px -40px -60px;
+    min-height: calc(100vh - 30px);
+    padding: 0 18px 34px;
+    background: #071019;
+  }
+  .circuit-header {
+    height: 74px;
+    margin: 0 -18px 14px;
+    padding: 0 22px;
+    border-bottom: 1px solid #24384a;
+    background: #0b1722;
+  }
+  .circuit-title { gap: 10px; }
+  .circuit-title-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: 5px;
+    background: #122d35;
+    border: 1px solid #2c9b8c;
+    color: #4ce0bc;
+  }
+  .composer-breadcrumb {
+    margin-bottom: 4px;
+    color: #70879a;
+    font: 9px/1.2 "SFMono-Regular", Consolas, monospace;
+    letter-spacing: 1px;
+  }
+  .composer-breadcrumb strong { color: #b6c9d5; }
+  .circuit-title h1 { font-size: 18px; letter-spacing: .1px; }
+  .circuit-title p { margin-top: 2px; color: #718697; font-size: 10px; }
+  .circuit-actions { align-items: center; gap: 7px; }
+  .engine-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-right: 6px;
+    color: #7fa296;
+    font: 10px "SFMono-Regular", Consolas, monospace;
+  }
+  .engine-status i {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #42d3b2;
+    box-shadow: 0 0 8px #42d3b2;
+  }
+  .clear-button, .run-circuit-button {
+    border-radius: 4px;
+    padding: 8px 11px;
+    font-size: 10px;
+  }
+  .clear-button { border-color: #2d4356; background: #10202d; color: #a9bac7; }
+  .run-circuit-button { background: #19a887; }
+  .circuit-workspace {
+    height: calc(100vh - 160px);
+    min-height: 540px;
+    gap: 0;
+    border: 1px solid #263d50;
+    background: #0b1722;
+  }
+  .gate-panel {
+    width: 216px;
+    padding: 15px 12px;
+    border: 0;
+    border-right: 1px solid #263d50;
+    border-radius: 0;
+    background: #0c1823;
+  }
+  .panel-kicker {
+    color: #42d3b2;
+    font: 9px "SFMono-Regular", Consolas, monospace;
+    letter-spacing: 1.4px;
+  }
+  .panel-heading h2 { margin-top: 7px; font-size: 15px; }
+  .panel-heading p { margin-bottom: 13px; font-size: 10px; }
+  .gate-list {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 5px;
+  }
+  .gate-item {
+    min-width: 0;
+    height: 52px;
+    padding: 5px;
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+    border-radius: 4px;
+    border-color: #263d50;
+    background: #101f2c;
+  }
+  .gate-item > svg, .gate-info span { display: none; }
+  .gate-symbol {
+    width: 27px;
+    height: 27px;
+    border-radius: 3px;
+    border-color: #45738a;
+    background: #142b3b;
+    color: #65dcc4;
+    font-size: 10px;
+  }
+  .gate-info { flex: initial; }
+  .gate-info strong { color: #b9cad5; font-size: 9px; }
+  .gate-item:hover, .selected-gate-item {
+    border-color: #42d3b2;
+    background: #133b3d;
+    box-shadow: none;
+  }
+  .selected-gate, .gate-editor, .placement-controls, .gate-help {
+    border-radius: 4px;
+    background: #102330;
+    border-color: #294c5b;
+  }
+  .circuit-canvas {
+    border: 0;
+    border-radius: 0;
+    background: #09131d;
+    overflow: auto;
+  }
+  .canvas-topbar {
+    height: 47px;
+    padding: 0 16px;
+    border-bottom: 1px solid #263d50;
+    background: #0d1c29;
+  }
+  .canvas-topbar > div:first-child { display: flex; align-items: center; gap: 15px; }
+  .canvas-tab {
+    color: #50dabb;
+    font: 11px "SFMono-Regular", Consolas, monospace;
+    border-bottom: 2px solid #42d3b2;
+    padding: 16px 2px 14px;
+  }
+  .canvas-tab.muted { border: 0; color: #657b8d; }
+  .quantum-circuit { padding: 29px 20px; background-image: linear-gradient(rgba(46, 73, 91, .12) 1px, transparent 1px), linear-gradient(90deg, rgba(46, 73, 91, .10) 1px, transparent 1px); background-size: 70px 70px; }
+  .qubit-header { color: #5f7688; font: 9px "SFMono-Regular", Consolas, monospace; }
+  .column-number { color: #5f7688; font: 9px "SFMono-Regular", Consolas, monospace; }
+  .qubit-label { color: #75a4b0; font: 13px "SFMono-Regular", Consolas, monospace; }
+  .quantum-wire { height: 1px; background: #4b6a78; }
+  .circuit-cell { width: 70px; }
+  .placed-gate {
+    width: 38px;
+    height: 38px;
+    border-radius: 4px;
+    border-width: 1px;
+    background: #16313e;
+    color: #64e3c3;
+    box-shadow: 0 0 0 2px rgba(66,211,178,.06);
+  }
+  .placed-cnot, .multi-gate { background: #14413f; border-color: #42d3b2; }
+  .cnot-connector { background: #42d3b2; width: 1px; }
+  .empty-circuit { top: 57%; }
+  .empty-icon { border-radius: 4px; background: #12302f; color: #42d3b2; }
+
+  @media (max-width: 850px) {
+    .circuit-page { margin: -20px -20px -40px; padding: 0 10px 25px; }
+    .circuit-header { margin-left: -10px; margin-right: -10px; padding: 0 12px; }
+    .engine-status { display: none; }
+  }
+
   .circuit-actions {
     width: 100%;
   }

@@ -318,11 +318,13 @@ function CircuitLab() {
         <div className="circuit-title">
           <div className="circuit-title-icon"><Atom size={22} /></div>
           <div>
-            <h1>Circuit Lab</h1>
-            <p>Build and experiment with quantum circuits</p>
+            <div className="composer-breadcrumb">WORKSPACE / CIRCUITS / <strong>UNTITLED CIRCUIT</strong></div>
+            <h1>Quantum Composer</h1>
+            <p>Design · simulate · understand</p>
           </div>
         </div>
         <div className="circuit-actions">
+          <span className="engine-status"><i /> Aer simulator ready</span>
           <button type="button" className="clear-button" onClick={clearCircuit}>
             <RotateCcw size={16} /> Clear
           </button>
@@ -341,8 +343,9 @@ function CircuitLab() {
       <div className="circuit-workspace">
         <aside className="gate-panel">
           <div className="panel-heading">
-            <h2>Quantum Gates</h2>
-            <p>Drag a gate to a slot, or select one and click a slot.</p>
+            <span className="panel-kicker">INSTRUCTIONS</span>
+            <h2>Gate library</h2>
+            <p>Drag an instruction onto a wire. Click to select.</p>
           </div>
           <div className="gate-list">
             {GATES.map((gate) => (
@@ -436,7 +439,7 @@ function CircuitLab() {
 
         <div className="circuit-canvas">
           <div className="canvas-topbar">
-            <div><span>Quantum Circuit</span><small>{circuit.length} qubits · {NUMBER_OF_COLUMNS} steps</small></div>
+            <div><span className="canvas-tab">Circuit</span><span className="canvas-tab muted">QASM</span><small>{circuit.length} qubits · {NUMBER_OF_COLUMNS} steps</small></div>
             <div className="circuit-stats"><span>Qubits:<strong>{circuit.length}</strong></span><span>Gates:<strong>{gateCount}</strong></span></div>
           </div>
 
