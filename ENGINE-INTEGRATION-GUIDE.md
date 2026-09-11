@@ -36,7 +36,35 @@ The frontend should use the deployed engine URL in production, for example:
 VITE_QUANTUM_ENGINE_URL=https://engine.example.com
 ```
 
-## 2. Canonical circuit format
+## 2.1 CodeChef-style exercises
+
+Use `GET /exercises` to populate the exercise list. Load a complete exercise
+with `GET /exercises/{id}`, then submit the learner's circuit:
+
+```js
+const result = await fetch(`${ENGINE_URL}/exercises/bell-state/submit`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    user_id: "student-123",
+    circuit: {
+      num_qubits: 2,
+      shots: 1024,
+      gates: [
+        { name: "h", qubits: [0] },
+        { name: "cx", qubits: [0, 1] }
+      ]
+    }
+  })
+}).then((response) => response.json());
+```
+
+The result contains `passed`, a percentage `score`, individual `checks`,
+feedback, simulator counts, and probabilities. Public checks are deterministic;
+hidden checks and curriculum-specific grading can be added later without
+changing the submission shape.
+
+## 3. Canonical circuit format
 
 All clients should use this format when sending circuits:
 
@@ -75,7 +103,7 @@ Use `shots` on the circuit to select the number of measurement shots
 (default `1024`, maximum `100000`). `POST /simulate` returns both measurement
 counts and statevector-derived probabilities.
 
-## 3. Frontend integration
+## 4. Frontend integration
 
 ### Tutor request
 
@@ -209,7 +237,7 @@ Send `{ "title": "...", "circuit": { ... } }` to
 `POST /integrations/jupyter`. The response is a Jupyter Notebook JSON document;
 the frontend can serialize it as a `.ipynb` download.
 
-## 4. Backend integration
+## 5. Backend integration
 
 The main backend should normally proxy requests to the engine instead of
 exposing Ollama or the engine directly to public users.
@@ -262,7 +290,7 @@ The main backend should:
 - Keep the engine URL, Ollama URL, and credentials in server-side secrets.
 - Add request IDs when proxying so failures can be traced across services.
 
-## 5. Error handling contract
+## 6. Error handling contract
 
 Clients should handle these cases:
 
@@ -274,7 +302,7 @@ Clients should handle these cases:
 | `503` | Granite service unavailable | Show retry/service-unavailable state; do not fabricate an answer |
 | `5xx` | Engine failure | Show a generic failure and report the request ID if available |
 
-## 6. Production boundary
+## 7. Production boundary
 
 Before production use, the team must add authentication, HTTPS, exact CORS
 origins, production database storage, rate limiting, observability, backups,

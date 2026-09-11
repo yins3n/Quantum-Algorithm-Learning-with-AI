@@ -31,6 +31,9 @@ The backend uses **Granite 3.2 8B Instruct** through Ollama. Set `OLLAMA_URL`,
 | `PUT /users/{id}/preferences` | Persist learning preferences |
 | `POST /evaluate` | Validate submitted code syntax/safety, validate the circuit, and run Qiskit Aer when installed |
 | `POST /simulate` | Run a validated circuit with Qiskit Aer and return counts/probabilities |
+| `GET /exercises` | List available CodeChef-style exercises |
+| `GET /exercises/{id}` | Load an exercise definition and its public checks |
+| `POST /exercises/{id}/submit` | Evaluate a learner circuit, score it, and record the attempt |
 | `POST /integrations/composer` | Convert the circuit to OpenQASM for live Composer editing |
 | `POST /integrations/jupyter` | Return a downloadable `.ipynb` notebook |
 
@@ -55,8 +58,9 @@ The evaluator validates the circuit before simulation. It never treats an LLM
 response as mathematical truth. Qiskit Aer remains the source of simulator
 results, while Granite explains the validated result and helps the learner.
 The current evaluator establishes the CodeChef-style execution contract; a
-curriculum can later add exercise-specific `expected` assertions without
-changing the frontend integration.
+curriculum can add exercise-specific checks without changing the frontend
+integration. Exercise pass/fail is determined by circuit validation and
+Qiskit Aer results; Granite is not used as an evaluator.
 
 ## Safety and persistence
 

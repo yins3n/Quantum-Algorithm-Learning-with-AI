@@ -59,6 +59,23 @@ class EvaluateRequest(BaseModel):
     source: str | None = Field(default=None, max_length=20000)
 
 
+class Exercise(BaseModel):
+    id: str
+    version: int = 1
+    title: str
+    description: str
+    difficulty: str
+    num_qubits: int
+    starter_circuit: Circuit
+    checks: dict[str, Any]
+
+
+class ExerciseSubmission(BaseModel):
+    user_id: str
+    circuit: Circuit
+    source: str | None = Field(default=None, max_length=20000)
+
+
 class NotebookRequest(BaseModel):
     circuit: Circuit
     title: str = "Quantum learning exercise"
@@ -72,6 +89,31 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+EXERCISES: dict[str, Exercise] = {
+    "bell-state": Exercise(
+        id="bell-state",
+        title="Create a Bell state",
+        description="Create an entangled two-qubit state with equal probability of measuring 00 and 11.",
+        difficulty="beginner",
+        num_qubits=2,
+        starter_circuit=Circuit(num_qubits=2),
+        checks={
+            "required_gates": ["h", "cx"],
+            "probabilities": {"00": 0.5, "11": 0.5},
+            "tolerance": 0.05,
+        },
+    ),
+    "superposition": Exercise(
+        id="superposition",
+        title="Create a single-qubit superposition",
+        description="Put qubit 0 into an equal superposition of |0> and |1>.",
+        difficulty="beginner",
+        num_qubits=1,
+        starter_circuit=Circuit(num_qubits=1),
+        checks={"required_gates": ["h"], "probabilities": {"0": 0.5, "1": 0.5}, "tolerance": 0.05},
+    ),
+}
 
 
 def utc_now() -> str:
@@ -264,9 +306,94 @@ def safe_python_check(source: str) -> list[str]:
     return issues
 
 
+def evaluate_checks(circuit: Circuit, simulation: dict[str, Any], checks: dict[str, Any]) -> list[dict[str, Any]]:
+    """Evaluate only simulator-confirmed facts and structural circuit properties."""
+    results: list[dict[str, Any]] = []
+    gate_names = [gate.name.lower() for gate in circuit.gates]
+    for required in checks.get("required_gates", []):
+        passed = required.lower() in gate_names
+        results.append({
+            "name": f"required gate: {required}",
+            "passed": passed,
+            "message": f"Required gate '{required}' is {'present' if passed else 'missing'}.",
+        })
+    probabilities = simulation.get("probabilities") or {}
+    tolerance = float(checks.get("tolerance", 0.01))
+    for state, expected in checks.get("probabilities", {}).items():
+        actual = float(probabilities.get(state, 0.0))
+        passed = abs(actual - float(expected)) <= tolerance
+        results.append({
+            "name": f"probability: {state}",
+            "passed": passed,
+            "expected": expected,
+            "actual": actual,
+            "tolerance": tolerance,
+            "message": f"State {state}: expected {expected}, measured {actual}.",
+        })
+    return results
+
+
+def submit_exercise(exercise: Exercise, request: ExerciseSubmission) -> dict[str, Any]:
+    errors = validate_circuit(request.circuit)
+    if request.circuit.num_qubits != exercise.num_qubits:
+        errors.append(f"This exercise requires exactly {exercise.num_qubits} qubit(s).")
+    if request.source:
+        errors.extend(safe_python_check(request.source))
+    simulation = simulate(request.circuit) if not errors else None
+    checks = evaluate_checks(request.circuit, simulation, exercise.checks) if simulation else []
+    passed_checks = sum(1 for check in checks if check["passed"])
+    total_checks = len(checks)
+    passed = not errors and total_checks > 0 and passed_checks == total_checks
+    score = round((passed_checks / total_checks) * 100) if total_checks else 0
+    feedback = errors or [check["message"] for check in checks if not check["passed"]]
+    if passed:
+        feedback = ["All public checks passed."]
+    record_attempt(request.user_id, passed, feedback)
+    connection = db()
+    connection.execute(
+        "INSERT INTO attempts VALUES (?, ?, ?, ?, ?)",
+        (str(uuid.uuid4()), request.user_id, int(passed), json.dumps(feedback), utc_now()),
+    )
+    connection.commit()
+    connection.close()
+    return {
+        "exercise_id": exercise.id,
+        "version": exercise.version,
+        "passed": passed,
+        "score": score,
+        "checks": checks,
+        "feedback": feedback,
+        "simulation": simulation,
+    }
+
+
 @app.get("/health")
 def health() -> dict[str, Any]:
     return {"status": "ok", "llm": OLLAMA_MODEL, "qiskit": "optional"}
+
+
+@app.get("/exercises")
+def list_exercises() -> list[dict[str, Any]]:
+    return [
+        exercise.model_dump(exclude={"starter_circuit", "checks"})
+        for exercise in EXERCISES.values()
+    ]
+
+
+@app.get("/exercises/{exercise_id}")
+def get_exercise(exercise_id: str) -> Exercise:
+    exercise = EXERCISES.get(exercise_id)
+    if exercise is None:
+        raise HTTPException(status_code=404, detail="Exercise not found.")
+    return exercise
+
+
+@app.post("/exercises/{exercise_id}/submit")
+def submit(exercise_id: str, request: ExerciseSubmission) -> dict[str, Any]:
+    exercise = EXERCISES.get(exercise_id)
+    if exercise is None:
+        raise HTTPException(status_code=404, detail="Exercise not found.")
+    return submit_exercise(exercise, request)
 
 
 @app.get("/users/{user_id}")
@@ -295,14 +422,17 @@ def evaluate(request: EvaluateRequest) -> dict[str, Any]:
     if request.source:
         errors.extend(safe_python_check(request.source))
     simulation = simulate(request.circuit) if not errors else None
-    passed = not errors
-    feedback = errors or ["Circuit structure is valid. Run it in the simulator and compare the result with the exercise expectation."]
+    checks = evaluate_checks(request.circuit, simulation, request.expected) if simulation and request.expected else []
+    passed = not errors and all(check["passed"] for check in checks)
+    feedback = errors or [check["message"] for check in checks if not check["passed"]]
+    if not feedback:
+        feedback = ["Circuit structure is valid."] if not request.expected else ["All supplied checks passed."]
     record_attempt(request.user_id, passed, feedback)
     connection = db()
     connection.execute("INSERT INTO attempts VALUES (?, ?, ?, ?, ?)", (str(uuid.uuid4()), request.user_id, int(passed), json.dumps(feedback), utc_now()))
     connection.commit()
     connection.close()
-    return {"passed": passed, "feedback": feedback, "simulation": simulation}
+    return {"passed": passed, "score": 100 if passed else 0, "checks": checks, "feedback": feedback, "simulation": simulation}
 
 
 @app.post("/simulate")
