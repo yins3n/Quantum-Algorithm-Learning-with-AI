@@ -10,6 +10,7 @@ async function getJSON(url, options = {}) {
 }
 
 let currentProblemId = null;
+const allowedNotebookUrls = new Set();
 
 async function loadComposerTemplates() {
   const data = await getJSON("/api/composer/templates");
@@ -48,10 +49,19 @@ async function loadProblem() {
   sampleInputs.innerHTML = "";
   problem.samples.forEach((sample, index) => {
     const row = document.createElement("div");
-    row.innerHTML = `
-      <label>Sample ${index + 1} input: <code>${sample.input}</code></label>
-      <input data-sample-output="${index}" placeholder="Expected output" />
-    `;
+
+    const label = document.createElement("label");
+    label.textContent = `Sample ${index + 1} input: `;
+    const code = document.createElement("code");
+    code.textContent = sample.input;
+    label.appendChild(code);
+
+    const input = document.createElement("input");
+    input.setAttribute("data-sample-output", String(index));
+    input.setAttribute("placeholder", "Expected output");
+
+    row.appendChild(label);
+    row.appendChild(input);
     sampleInputs.appendChild(row);
   });
 }
@@ -73,15 +83,28 @@ async function loadNotebooks() {
   const data = await getJSON("/api/notebooks");
   const select = document.getElementById("notebookSelect");
   select.innerHTML = "";
+  allowedNotebookUrls.clear();
 
   data.notebooks.forEach((notebook) => {
     const option = document.createElement("option");
     option.value = notebook.url;
     option.textContent = notebook.title;
+    allowedNotebookUrls.add(notebook.url);
     select.appendChild(option);
   });
 
-  document.getElementById("notebookFrame").src = select.value;
+  setNotebookFrame(select.value);
+}
+
+function setNotebookFrame(selectedUrl) {
+  if (!allowedNotebookUrls.has(selectedUrl)) {
+    throw new Error("Notebook URL is not in the allowed list.");
+  }
+  const parsed = new URL(selectedUrl);
+  if (parsed.protocol !== "https:") {
+    throw new Error("Only HTTPS notebook URLs are allowed.");
+  }
+  document.getElementById("notebookFrame").src = parsed.toString();
 }
 
 async function askAI() {
@@ -103,7 +126,7 @@ document.getElementById("runSimulation").addEventListener("click", () => runSimu
 document.getElementById("submitEvaluation").addEventListener("click", () => submitEvaluation().catch(alert));
 document.getElementById("openNotebook").addEventListener("click", () => {
   const selectedUrl = document.getElementById("notebookSelect").value;
-  document.getElementById("notebookFrame").src = selectedUrl;
+  setNotebookFrame(selectedUrl);
 });
 document.getElementById("askAi").addEventListener("click", () => askAI().catch(alert));
 
