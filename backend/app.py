@@ -290,41 +290,85 @@ def fallback_tutor(errors: list[str], simulation: dict[str, Any] | None, sources
 
 
 def call_granite(prompt: str, fallback: TutorResponse) -> TutorResponse:
-    payload = json.dumps({
-        "model": OLLAMA_MODEL,
-        "stream": False,
-        "messages": [
-            {"role": "system", "content": "You are a patient quantum-computing tutor. Use only VERIFIED_ENGINE_FACTS and TRUSTED_KNOWLEDGE. Never invent simulator results, scores, gates, or citations. Return only valid JSON with keys explanation, error_category, hint, suggested_fix, next_step, teaching_steps, and sources. teaching_steps must be 1-4 concise, observable teaching actions; do not reveal private chain-of-thought. Avoid repeating previous_errors; advance the learner one step."},
-            {"role": "user", "content": prompt},
-        ],
-        "format": "json",
-        "options": {"temperature": 0.15, "top_p": 0.8, "repeat_penalty": 1.15, "repeat_last_n": 256},
-    }).encode()
-    request = urllib.request.Request(f"{OLLAMA_URL}/api/chat", data=payload, headers={"Content-Type": "application/json"})
-    try:
+    system_prompt = (
+        "You are a patient quantum-computing tutor. Treat the JSON inside "
+        "<verified_engine_facts> as authoritative and use trusted knowledge "
+        "only for general explanations. Never invent simulator results, "
+        "scores, gates, or citations. Return exactly one JSON object and "
+        "nothing else. Required fields are explanation, error_category, hint, "
+        "suggested_fix, next_step, teaching_steps, and sources. "
+        "suggested_fix must be an object or null. teaching_steps must contain "
+        "1-4 concise observable actions; do not reveal private chain-of-thought. "
+        "Keep explanation, hint, and next_step distinct."
+    )
+    options = {
+        "temperature": 0.1,
+        "top_p": 0.8,
+        "top_k": 20,
+        "repeat_penalty": 1.15,
+        "repeat_last_n": 256,
+        "num_predict": 300,
+        "stop": ["<|user|>", "<|system|>"],
+    }
+
+    def request_response(messages: list[dict[str, str]]) -> str:
+        payload = json.dumps({
+            "model": OLLAMA_MODEL,
+            "stream": False,
+            "messages": messages,
+            "format": "json",
+            "options": options,
+        }).encode()
+        request = urllib.request.Request(
+            f"{OLLAMA_URL}/api/chat",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
         with urllib.request.urlopen(request, timeout=45) as response:
-            raw = json.loads(response.read())["message"]["content"]
-            parsed = TutorResponse.model_validate_json(raw)
-            return parsed
-    except (urllib.error.URLError, TimeoutError) as error:
-        return fallback
-    except (json.JSONDecodeError, KeyError, ValueError):
-        return fallback
+            return json.loads(response.read())["message"]["content"]
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": prompt},
+    ]
+    try:
+        raw = request_response(messages)
+        return TutorResponse.model_validate_json(raw)
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, KeyError, ValueError):
+        retry_prompt = (
+            "Your previous response was invalid. Return exactly one JSON "
+            "object and nothing else. Do not use Markdown or a second object. "
+            "Use the required fields and make suggested_fix an object or null. "
+            "Use only the facts inside <verified_engine_facts>.\n\n" + prompt
+        )
+        try:
+            raw = request_response([messages[0], {"role": "user", "content": retry_prompt}])
+            return TutorResponse.model_validate_json(raw)
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, KeyError, ValueError):
+            return fallback
 
 
 def tutor_context(request: TutorRequest, learner: dict[str, Any], errors: list[str], simulation: dict[str, Any] | None, sources: list[KnowledgeChunk]) -> str:
-    return json.dumps({
-        "VERIFIED_ENGINE_FACTS": {
-            "validation_errors": errors,
-            "simulation": simulation,
-            "evaluator_passed": not errors if simulation is not None else None,
-        },
-        "TRUSTED_KNOWLEDGE": [{"title": item.title, "text": item.text, "source": item.source} for item in sources],
-        "learner_profile": learner,
-        "question": request.message,
-        "previous_errors": learner["recent_errors"][-3:],
-        "circuit": request.circuit.model_dump() if request.circuit else None,
-    }, indent=2)
+    facts = {
+        "validation_errors": errors,
+        "simulation": simulation,
+        "evaluator_passed": not errors if simulation is not None else None,
+    }
+    knowledge = [{"title": item.title, "text": item.text, "source": item.source} for item in sources]
+    return (
+        "<verified_engine_facts>\n"
+        + json.dumps(facts, indent=2)
+        + "\n</verified_engine_facts>\n"
+        + "<trusted_knowledge>\n"
+        + json.dumps(knowledge, indent=2)
+        + "\n</trusted_knowledge>\n"
+        + json.dumps({
+            "learner_profile": learner,
+            "question": request.message,
+            "previous_errors": learner["recent_errors"][-3:],
+            "circuit": request.circuit.model_dump() if request.circuit else None,
+        }, indent=2)
+    )
 
 
 def qasm(circuit: Circuit) -> str:
