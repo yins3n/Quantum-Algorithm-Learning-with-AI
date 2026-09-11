@@ -29,6 +29,8 @@ Configuration can be provided through `.env`:
 OLLAMA_URL=http://localhost:11434
 OLLAMA_MODEL=granite3.2:8b
 CORS_ORIGINS=http://localhost:3000,http://localhost:5173
+USER_ACCESS_MODE=development
+DEV_USER_IDS=demo-user
 ```
 
 The frontend should use the deployed engine URL in production, for example:
@@ -36,6 +38,12 @@ The frontend should use the deployed engine URL in production, for example:
 ```env
 VITE_QUANTUM_ENGINE_URL=https://engine.example.com
 ```
+
+Development mode is intentionally bounded: user-specific requests are
+accepted only for IDs in `DEV_USER_IDS`. This is not authentication and must
+not be used as production access control. A non-development access mode
+returns an explicit unavailable error until a real authentication integration
+is installed.
 
 Tutor responses are grounded with `GET /knowledge/search` results and
 deterministic validation/Aer facts. They return concise `teaching_steps`, not
@@ -105,8 +113,11 @@ Supported gates currently are:
 Qubit indexes are zero-based. The engine validates gate names, qubit ranges,
 gate arity, and invalid CNOT control/target combinations before simulation.
 Use `shots` on the circuit to select the number of measurement shots
-(default `1024`, maximum `100000`). `POST /simulate` returns both measurement
-counts and statevector-derived probabilities.
+(default `1024`, maximum `10000`). `POST /simulate` returns both measurement
+counts and statevector-derived probabilities. Explicit measurements must be
+terminal and each qubit may be measured at most once. Circuits without
+explicit measurements are measured automatically with one stable classical
+register.
 
 ## 4. Frontend integration
 
@@ -138,7 +149,15 @@ The response contains:
 
 ```json
 {
-  "answer": "Tutor explanation from Granite",
+  "answer": {
+    "explanation": "Tutor explanation from Granite",
+    "error_category": "circuit_validation",
+    "hint": "A concise hint",
+    "suggested_fix": null,
+    "next_step": "A concrete next action",
+    "teaching_steps": [],
+    "sources": []
+  },
   "validated_errors": [],
   "learner_profile": {
     "user_id": "student-123",
@@ -162,7 +181,10 @@ export async function evaluateCircuit(userId, circuit, source = null) {
     body: JSON.stringify({
       user_id: userId,
       circuit,
-      expected: {},
+      expected: {
+        probabilities: { "00": 0.5, "11": 0.5 },
+        tolerance: 0.05
+      },
       source
     })
   });
@@ -175,13 +197,14 @@ export async function evaluateCircuit(userId, circuit, source = null) {
 }
 ```
 
-Successful evaluation returns:
+Successful evaluation returns (an empty `expected` object is not a passing
+evaluation):
 
 ```json
 {
   "passed": true,
   "feedback": [
-    "Circuit structure is valid. Run it in the simulator and compare the result with the exercise expectation."
+    "All supplied checks passed."
   ],
   "simulation": {
     "engine": "qiskit-aer",
@@ -195,8 +218,11 @@ Successful evaluation returns:
 }
 ```
 
-If Qiskit is not installed or available, the response reports
-`"engine": "validation-only"` and does not claim to have simulated the
+The old `frontend to backend` request example is intentionally removed; clients
+must use the canonical circuit format above.
+
+If Qiskit is not installed or available, simulation-dependent endpoints return
+an explicit unavailable error/result and never claim to have simulated the
 circuit.
 
 ### Load and save preferences

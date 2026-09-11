@@ -1,0 +1,13 @@
+Quantum Learning Platform
+
+Training-data provenance:
+
+- Qiskit QuantumKatas is tracked in training/dataset_manifest.json and is
+  licensed CC-BY-NC-SA-4.0. It is non-commercial and requires attribution and
+  share-alike treatment for adaptations.
+- Qiskit HumanEval is tracked in training/dataset_manifest.json and is
+  licensed Apache-2.0. Preserve the applicable notices when redistributing
+  covered material.
+
+This repository does not include copies of those external datasets. Review
+their licenses and the manifest before using derived material in a product.

@@ -21,6 +21,10 @@ The API is available at `http://localhost:8000/docs`. In another terminal:
 
 The backend uses **Granite 3.2 8B Instruct** through Ollama. Set `OLLAMA_URL`,
 `OLLAMA_MODEL`, and `CORS_ORIGINS` using `.env.example` values when needed.
+This prototype uses an explicit development access boundary: user-specific
+endpoints allow only IDs listed in `DEV_USER_IDS` (default `demo-user`). This
+is not authentication and must not be exposed publicly; production requires a
+real authentication and authorization integration.
 
 ## Website integration contract
 
@@ -32,6 +36,7 @@ The backend uses **Granite 3.2 8B Instruct** through Ollama. Set `OLLAMA_URL`,
 | `PUT /users/{id}/preferences` | Persist learning preferences |
 | `POST /evaluate` | Validate submitted code syntax/safety, validate the circuit, and run Qiskit Aer when installed |
 | `POST /simulate` | Run a validated circuit with Qiskit Aer and return counts/probabilities |
+| `GET /health/ready` | Check database and simulator readiness (503 when unavailable) |
 | `GET /exercises` | List available CodeChef-style exercises |
 | `GET /exercises/{id}` | Load an exercise definition and its public checks |
 | `POST /exercises/{id}/submit` | Evaluate a learner circuit, score it, and record the attempt |
@@ -54,6 +59,9 @@ Supported gates include single-qubit gates (`h`, `x`, `y`, `z`, `s`, `sdg`,
 `t`, `tdg`, `rx`, `ry`, `rz`, `u`), two-qubit gates (`cx`, `cy`, `cz`, `swap`,
 `ch`), `ccx`, and `measure`. Parametric gates use a `params` array in radians;
 `rx`, `ry`, and `rz` take one value and `u` takes three.
+Explicit measurements are supported only as terminal operations and map qubit
+`i` to classical bit `i`. Circuits without explicit measurements are measured
+automatically at the end; non-terminal or duplicate measurements are rejected.
 
 The Circuit Lab palette supports click-to-place and drag-and-drop placement.
 Multi-qubit gates are assembled in one time-step by placing the first qubit and
@@ -68,6 +76,9 @@ The current evaluator establishes the CodeChef-style execution contract; a
 curriculum can add exercise-specific checks without changing the frontend
 integration. Exercise pass/fail is determined by circuit validation and
 Qiskit Aer results; Granite is not used as an evaluator.
+`POST /evaluate` requires at least one expected gate or probability check, so
+an empty `expected` object never reports success. If Aer is unavailable, no
+simulator result or passing score is fabricated.
 
 ## Retrieval and reasoning
 
@@ -95,3 +106,8 @@ The frontend's registration portal creates a learner profile through
 subsequent tutor and exercise requests. This is intentionally a profile
 onboarding flow, not an authentication system: the backend does not issue
 passwords, sessions, tokens, or other auth claims.
+
+The frontend also provides evaluator-backed progress at `/progress`, passes the
+last Circuit Lab circuit into the tutor workflow, and downloads notebooks from
+`POST /integrations/jupyter`. These features require the API URL configured in
+`VITE_QUANTUM_ENGINE_URL`.

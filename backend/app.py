@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import ast
 import json
+import math
 import os
+import re
 import sqlite3
 import urllib.error
 import urllib.request
@@ -13,7 +15,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from backend.rag import KnowledgeChunk, retrieve
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -28,6 +30,11 @@ SUPPORTED_GATES = {
 ONE_QUBIT_GATES = {"h", "x", "y", "z", "s", "sdg", "t", "tdg", "rx", "ry", "rz", "u", "measure"}
 TWO_QUBIT_GATES = {"cx", "cy", "cz", "swap", "ch"}
 PARAMETRIC_GATES = {"rx", "ry", "rz", "u"}
+MAX_QUBITS = 12
+MAX_GATES = 200
+MAX_SHOTS = 10_000
+MAX_CHECKS = 64
+USER_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 
 
 class Gate(BaseModel):
@@ -35,20 +42,27 @@ class Gate(BaseModel):
     qubits: list[int] = Field(min_length=1, max_length=3)
     params: list[float] = Field(default_factory=list, max_length=3)
 
+    @field_validator("params")
+    @classmethod
+    def finite_params(cls, values: list[float]) -> list[float]:
+        if any(not math.isfinite(value) for value in values):
+            raise ValueError("gate parameters must be finite numbers")
+        return values
+
 
 class Circuit(BaseModel):
-    num_qubits: int = Field(ge=1, le=20)
-    gates: list[Gate] = Field(default_factory=list, max_length=200)
-    shots: int = Field(default=1024, ge=1, le=100_000)
+    num_qubits: int = Field(ge=1, le=MAX_QUBITS)
+    gates: list[Gate] = Field(default_factory=list, max_length=MAX_GATES)
+    shots: int = Field(default=1024, ge=1, le=MAX_SHOTS)
 
 
 class UserProfile(BaseModel):
-    user_id: str
-    preferences: dict[str, Any] = Field(default_factory=dict)
+    user_id: str = Field(min_length=1, max_length=128)
+    preferences: dict[str, Any] = Field(default_factory=dict, max_length=32)
 
 
 class TutorRequest(BaseModel):
-    user_id: str
+    user_id: str = Field(min_length=1, max_length=128)
     message: str = Field(min_length=1, max_length=6000)
     circuit: Circuit | None = None
 
@@ -64,9 +78,9 @@ class TutorResponse(BaseModel):
 
 
 class EvaluateRequest(BaseModel):
-    user_id: str
+    user_id: str = Field(min_length=1, max_length=128)
     circuit: Circuit
-    expected: dict[str, Any] = Field(default_factory=dict)
+    expected: dict[str, Any] = Field(default_factory=dict, max_length=8)
     source: str | None = Field(default=None, max_length=20000)
 
 
@@ -82,23 +96,32 @@ class Exercise(BaseModel):
 
 
 class ExerciseSubmission(BaseModel):
-    user_id: str
+    user_id: str = Field(min_length=1, max_length=128)
     circuit: Circuit
     source: str | None = Field(default=None, max_length=20000)
 
 
 class NotebookRequest(BaseModel):
     circuit: Circuit
-    title: str = "Quantum learning exercise"
+    title: str = Field(default="Quantum learning exercise", max_length=200)
 
 
 app = FastAPI(title="Quantum Learning Platform", version="0.1.0")
+cors_origins = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ORIGINS", "http://localhost:3000,http://localhost:5173"
+    ).split(",")
+    if origin.strip()
+]
+if "*" in cors_origins:
+    raise RuntimeError("CORS_ORIGINS must contain explicit origins; '*' is not allowed.")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("CORS_ORIGINS", "*").split(","),
+    allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "OPTIONS"],
+    allow_headers=["Content-Type", "X-User-ID"],
 )
 
 EXERCISES: dict[str, Exercise] = {
@@ -129,6 +152,26 @@ EXERCISES: dict[str, Exercise] = {
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def authorize_user(user_id: str) -> None:
+    """Apply the prototype's explicit development-only user boundary."""
+    mode = os.getenv("USER_ACCESS_MODE", "development").lower()
+    if mode != "development":
+        raise HTTPException(
+            status_code=503,
+            detail="User authentication is not configured for this deployment.",
+        )
+    configured = {
+        item.strip()
+        for item in os.getenv("DEV_USER_IDS", "demo-user").split(",")
+        if item.strip()
+    }
+    if not USER_ID_PATTERN.fullmatch(user_id) or user_id not in configured:
+        raise HTTPException(
+            status_code=403,
+            detail="This development instance does not permit access to that user profile.",
+        )
 
 
 def db() -> sqlite3.Connection:
@@ -212,8 +255,20 @@ def record_attempt(user_id: str, passed: bool, feedback: list[str]) -> None:
 
 def validate_circuit(circuit: Circuit) -> list[str]:
     errors: list[str] = []
+    measured_qubits: set[int] = set()
+    measurement_started = False
     for index, gate in enumerate(circuit.gates):
         name = gate.name.lower()
+        if name == "measure":
+            measurement_started = True
+            if gate.qubits and gate.qubits[0] in measured_qubits:
+                errors.append(f"Gate {index + 1}: a qubit may only be measured once.")
+            measured_qubits.update(gate.qubits)
+        elif measurement_started:
+            errors.append(
+                f"Gate {index + 1}: gates after an explicit measurement are not supported; "
+                "measurements must be terminal."
+            )
         if name not in SUPPORTED_GATES:
             errors.append(f"Gate {index + 1}: '{gate.name}' is not supported.")
         expected_qubits = 3 if name == "ccx" else 2 if name in TWO_QUBIT_GATES else 1
@@ -229,33 +284,47 @@ def validate_circuit(circuit: Circuit) -> list[str]:
     return errors
 
 
+def build_quantum_circuit(circuit: Circuit, include_measurements: bool):
+    from qiskit import QuantumCircuit
+
+    qc = QuantumCircuit(circuit.num_qubits, circuit.num_qubits)
+    has_explicit_measurement = any(
+        gate.name.lower() == "measure" for gate in circuit.gates
+    )
+    for gate in circuit.gates:
+        name = gate.name.lower()
+        if name == "measure":
+            if include_measurements:
+                qc.measure(gate.qubits[0], gate.qubits[0])
+            continue
+        if name == "ccx":
+            qc.ccx(*gate.qubits)
+        elif name in TWO_QUBIT_GATES:
+            getattr(qc, name)(*gate.qubits)
+        elif name in PARAMETRIC_GATES:
+            getattr(qc, name)(*gate.params, gate.qubits[0])
+        else:
+            getattr(qc, name)(gate.qubits[0])
+    if include_measurements and not has_explicit_measurement:
+        for qubit in range(circuit.num_qubits):
+            qc.measure(qubit, qubit)
+    return qc
+
+
 def simulate(circuit: Circuit) -> dict[str, Any]:
     """Run the validated circuit with Qiskit Aer and return simulator data."""
     try:
-        from qiskit import QuantumCircuit, transpile
+        from qiskit import transpile
         from qiskit_aer import AerSimulator
 
-        qc = QuantumCircuit(circuit.num_qubits, circuit.num_qubits)
-        for gate in circuit.gates:
-            name = gate.name.lower()
-            if name == "measure":
-                continue
-            if name == "ccx":
-                qc.ccx(*gate.qubits)
-            elif name in TWO_QUBIT_GATES:
-                getattr(qc, name)(*gate.qubits)
-            elif name in PARAMETRIC_GATES:
-                getattr(qc, name)(*gate.params, gate.qubits[0])
-            else:
-                getattr(qc, name)(gate.qubits[0])
         simulator = AerSimulator()
+        qc = build_quantum_circuit(circuit, include_measurements=False)
         statevector_circuit = transpile(qc.copy(), simulator)
         statevector_circuit.save_statevector()
         state_result = simulator.run(statevector_circuit).result()
         state = state_result.get_statevector().data
         probabilities = {format(i, f"0{circuit.num_qubits}b"): round(float(abs(value) ** 2), 8) for i, value in enumerate(state)}
-        measurement_circuit = qc.copy()
-        measurement_circuit.measure_all()
+        measurement_circuit = build_quantum_circuit(circuit, include_measurements=True)
         counts = simulator.run(transpile(measurement_circuit, simulator), shots=circuit.shots).result().get_counts()
         return {
             "engine": "qiskit-aer",
@@ -265,6 +334,12 @@ def simulate(circuit: Circuit) -> dict[str, Any]:
         }
     except ImportError:
         return {"engine": "unavailable", "probabilities": None, "message": "Install qiskit and qiskit-aer to run Aer simulation."}
+    except (KeyError, RuntimeError, ValueError):
+        return {
+            "engine": "unavailable",
+            "probabilities": None,
+            "message": "The quantum simulator could not execute this circuit.",
+        }
 
 
 def fallback_tutor(errors: list[str], simulation: dict[str, Any] | None, sources: list[KnowledgeChunk]) -> TutorResponse:
@@ -353,7 +428,11 @@ def tutor_context(request: TutorRequest, learner: dict[str, Any], errors: list[s
     facts = {
         "validation_errors": errors,
         "simulation": simulation,
-        "evaluator_passed": not errors if simulation is not None else None,
+        "evaluator_passed": (
+            not errors
+            and simulation is not None
+            and simulation.get("probabilities") is not None
+        ),
     }
     knowledge = [{"title": item.title, "text": item.text, "source": item.source} for item in sources]
     return (
@@ -405,6 +484,38 @@ def safe_python_check(source: str) -> list[str]:
     return issues
 
 
+def validate_check_config(checks: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    required_gates = checks.get("required_gates", [])
+    if not isinstance(required_gates, list) or any(
+        not isinstance(gate, str) or not gate.strip() for gate in required_gates
+    ):
+        errors.append("required_gates must be a list of non-empty gate names.")
+    elif len(required_gates) > MAX_CHECKS:
+        errors.append(f"required_gates may contain at most {MAX_CHECKS} items.")
+    probabilities = checks.get("probabilities", {})
+    if not isinstance(probabilities, dict):
+        errors.append("probabilities must be an object mapping states to numbers.")
+    else:
+        if len(probabilities) > MAX_CHECKS:
+            errors.append(f"probabilities may contain at most {MAX_CHECKS} states.")
+        for state, expected in probabilities.items():
+            if not isinstance(state, str) or not state:
+                errors.append("probability state names must be non-empty strings.")
+            if isinstance(expected, bool) or not isinstance(expected, (int, float)) or not math.isfinite(expected):
+                errors.append(f"Expected probability for '{state}' must be finite.")
+            elif expected < 0 or expected > 1:
+                errors.append(f"Expected probability for '{state}' must be between 0 and 1.")
+    tolerance = checks.get("tolerance", 0.01)
+    if isinstance(tolerance, bool) or not isinstance(tolerance, (int, float)) or not math.isfinite(tolerance):
+        errors.append("tolerance must be a finite number.")
+    elif tolerance < 0 or tolerance > 1:
+        errors.append("tolerance must be between 0 and 1.")
+    if not required_gates and not probabilities:
+        errors.append("at least one expected check is required.")
+    return errors
+
+
 def evaluate_checks(circuit: Circuit, simulation: dict[str, Any], checks: dict[str, Any]) -> list[dict[str, Any]]:
     """Evaluate only simulator-confirmed facts and structural circuit properties."""
     results: list[dict[str, Any]] = []
@@ -439,12 +550,20 @@ def submit_exercise(exercise: Exercise, request: ExerciseSubmission) -> dict[str
     if request.source:
         errors.extend(safe_python_check(request.source))
     simulation = simulate(request.circuit) if not errors else None
-    checks = evaluate_checks(request.circuit, simulation, exercise.checks) if simulation else []
+    checks = (
+        evaluate_checks(request.circuit, simulation, exercise.checks)
+        if simulation and simulation.get("probabilities") is not None
+        else []
+    )
     passed_checks = sum(1 for check in checks if check["passed"])
     total_checks = len(checks)
     passed = not errors and total_checks > 0 and passed_checks == total_checks
     score = round((passed_checks / total_checks) * 100) if total_checks else 0
     feedback = errors or [check["message"] for check in checks if not check["passed"]]
+    if not errors and simulation and simulation.get("probabilities") is None:
+        feedback = [simulation.get("message", "Simulation unavailable; no score was assigned.")]
+    elif not errors and not checks:
+        feedback = ["No executable checks were available; no score was assigned."]
     if passed:
         feedback = ["All public checks passed."]
     record_attempt(request.user_id, passed, feedback)
@@ -466,9 +585,54 @@ def submit_exercise(exercise: Exercise, request: ExerciseSubmission) -> dict[str
     }
 
 
+def dependency_status() -> dict[str, str]:
+    status = {"database": "unavailable", "simulator": "unavailable", "rag": "available"}
+    connection = None
+    try:
+        connection = db()
+        connection.execute("SELECT 1").fetchone()
+        status["database"] = "available"
+    except (OSError, sqlite3.Error):
+        pass
+    finally:
+        if connection is not None:
+            connection.close()
+    try:
+        import qiskit_aer  # noqa: F401
+
+        status["simulator"] = "available"
+    except Exception:
+        pass
+    return status
+
+
 @app.get("/health")
 def health() -> dict[str, Any]:
-    return {"status": "ok", "llm": OLLAMA_MODEL, "qiskit": "optional", "rag": "local"}
+    dependencies = dependency_status()
+    return {
+        "status": "ok",
+        "llm": OLLAMA_MODEL,
+        "qiskit": dependencies["simulator"],
+        "rag": "local",
+        "dependencies": dependencies,
+        "llm_status": "configured" if OLLAMA_URL and OLLAMA_MODEL else "not_configured",
+    }
+
+
+@app.get("/health/ready")
+@app.get("/ready")
+def readiness() -> dict[str, Any]:
+    dependencies = dependency_status()
+    blocking = {
+        name: value for name, value in dependencies.items()
+        if name in {"database", "simulator"} and value != "available"
+    }
+    if blocking:
+        raise HTTPException(
+            status_code=503,
+            detail={"status": "not_ready", "dependencies": dependencies},
+        )
+    return {"status": "ready", "dependencies": dependencies}
 
 
 @app.get("/knowledge/search")
@@ -501,11 +665,13 @@ def submit(exercise_id: str, request: ExerciseSubmission) -> dict[str, Any]:
     exercise = EXERCISES.get(exercise_id)
     if exercise is None:
         raise HTTPException(status_code=404, detail="Exercise not found.")
+    authorize_user(request.user_id)
     return submit_exercise(exercise, request)
 
 
 @app.get("/users/{user_id}")
 def get_user(user_id: str) -> dict[str, Any]:
+    authorize_user(user_id)
     return profile(user_id)
 
 
@@ -513,11 +679,13 @@ def get_user(user_id: str) -> dict[str, Any]:
 def put_preferences(user_id: str, request: UserProfile) -> dict[str, Any]:
     if request.user_id != user_id:
         raise HTTPException(status_code=400, detail="user_id in the path and body must match.")
+    authorize_user(user_id)
     return update_profile(user_id, request.preferences)
 
 
 @app.post("/tutor")
 def tutor(request: TutorRequest) -> dict[str, Any]:
+    authorize_user(request.user_id)
     learner = profile(request.user_id)
     errors = validate_circuit(request.circuit) if request.circuit else []
     simulation = simulate(request.circuit) if request.circuit and not errors else None
@@ -535,15 +703,36 @@ def tutor(request: TutorRequest) -> dict[str, Any]:
 
 @app.post("/evaluate")
 def evaluate(request: EvaluateRequest) -> dict[str, Any]:
+    authorize_user(request.user_id)
     errors = validate_circuit(request.circuit)
     if request.source:
         errors.extend(safe_python_check(request.source))
+    check_errors = validate_check_config(request.expected)
+    malformed_check_errors = [
+        error for error in check_errors
+        if error != "at least one expected check is required."
+    ]
+    if malformed_check_errors:
+        raise HTTPException(status_code=422, detail=malformed_check_errors)
     simulation = simulate(request.circuit) if not errors else None
-    checks = evaluate_checks(request.circuit, simulation, request.expected) if simulation and request.expected else []
-    passed = not errors and all(check["passed"] for check in checks)
+    checks = (
+        evaluate_checks(request.circuit, simulation, request.expected)
+        if simulation and simulation.get("probabilities") is not None and not check_errors
+        else []
+    )
+    passed = (
+        not errors
+        and not check_errors
+        and bool(checks)
+        and all(check["passed"] for check in checks)
+    )
     feedback = errors or [check["message"] for check in checks if not check["passed"]]
+    if not errors and check_errors:
+        feedback = check_errors
+    elif not errors and simulation and simulation.get("probabilities") is None:
+        feedback = [simulation.get("message", "Simulation unavailable; no score was assigned.")]
     if not feedback:
-        feedback = ["Circuit structure is valid."] if not request.expected else ["All supplied checks passed."]
+        feedback = ["All supplied checks passed."]
     record_attempt(request.user_id, passed, feedback)
     connection = db()
     connection.execute("INSERT INTO attempts VALUES (?, ?, ?, ?, ?)", (str(uuid.uuid4()), request.user_id, int(passed), json.dumps(feedback), utc_now()))
@@ -557,7 +746,10 @@ def run_simulation(circuit: Circuit) -> dict[str, Any]:
     errors = validate_circuit(circuit)
     if errors:
         raise HTTPException(status_code=422, detail=errors)
-    return simulate(circuit)
+    result = simulate(circuit)
+    if result.get("probabilities") is None:
+        raise HTTPException(status_code=503, detail=result.get("message", "Simulator unavailable."))
+    return result
 
 
 @app.post("/integrations/composer")

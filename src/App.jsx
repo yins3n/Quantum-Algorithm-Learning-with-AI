@@ -19,6 +19,7 @@ import Challenges from "./pages/Challenges";
 import Tutor from "./pages/Tutor";
 import ChallengeDetail from "./pages/ChallengeDetail";
 import Registration from "./pages/Registration";
+import Progress from "./pages/Progress";
 import { getCurrentUserProfile } from "./services/user";
 import "./App.css";
 
@@ -148,15 +149,7 @@ function App() {
               element={<Tutor />}
             />
 
-            <Route
-              path="/progress"
-              element={
-                <div>
-                  <h1>Progress</h1>
-                  <p>Your learning progress will be shown here.</p>
-                </div>
-              }
-            />
+            <Route path="/progress" element={<Progress />} />
 
           </Routes>
 

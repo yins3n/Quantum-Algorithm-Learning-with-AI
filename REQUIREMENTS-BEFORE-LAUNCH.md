@@ -6,9 +6,12 @@ prototype; these items should be completed by the team before production launch.
 
 ## 1. Security and privacy
 
-- [ ] Add authentication and authorization for every user, circuit, attempt, and notebook.
+- [ ] Add production authentication and authorization for every user, circuit, attempt, and notebook.
+- [x] Bound prototype user access with the explicit `USER_ACCESS_MODE=development`
+      and `DEV_USER_IDS` allowlist; this is not production authentication.
 - [ ] Ensure users can access only their own learner profile and saved work.
-- [ ] Replace wildcard CORS with the exact production frontend origins.
+- [x] Replace wildcard CORS defaults with explicit local origins; configure the
+      exact production frontend origins before deployment.
 - [ ] Deploy the API and frontend behind HTTPS.
 - [ ] Store secrets in a deployment secret manager; never commit API keys or tokens.
 - [ ] Add rate limits and request-size limits for tutor, evaluation, notebook, and export endpoints.
@@ -41,7 +44,8 @@ prototype; these items should be completed by the team before production launch.
   - [ ] Automatic cleanup after every submission
 - [ ] Add deterministic test cases for supported gates, malformed circuits, large circuits, and invalid qubit indices.
 - [ ] Pin compatible Python, Qiskit, and Qiskit Aer versions.
-- [ ] Define maximum qubits, gates, shots, and simulator runtime per request.
+- [x] Define maximum qubits (12), gates (200), and shots (10,000) per request;
+      add deployment-level runtime limits before production.
 - [ ] Return stable error codes and feedback formats that the frontend can render.
 
 ## 4. Learner progress and curriculum
@@ -70,7 +74,8 @@ prototype; these items should be completed by the team before production launch.
 - [ ] Provide production Docker images or an equivalent repeatable deployment.
 - [ ] Separate development, staging, and production environments.
 - [ ] Add CI checks for formatting, type checking, tests, dependency vulnerabilities, and container scanning.
-- [ ] Add readiness and liveness checks for the API, database, Ollama, and quantum simulator.
+- [x] Add API liveness and database/simulator readiness endpoints; add
+      deployment-level Ollama health checks before production.
 - [ ] Add structured logs with request IDs and correlation IDs.
 - [ ] Add metrics for latency, error rate, token usage, simulator runtime, queue depth, and evaluation outcomes.
 - [ ] Configure alerting and an on-call owner for API, AI, database, and simulator failures.

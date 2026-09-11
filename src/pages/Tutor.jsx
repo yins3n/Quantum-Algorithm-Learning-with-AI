@@ -7,6 +7,7 @@ function Tutor() {
   const [message, setMessage] = useState("");
   const [answer, setAnswer] = useState(null);
   const [error, setError] = useState("");
+  const [circuitText, setCircuitText] = useState(() => window.localStorage.getItem("quantum_last_circuit") || "");
   const userId = getCurrentUserId();
 
   async function askTutor(event) {
@@ -14,7 +15,9 @@ function Tutor() {
     if (!message.trim()) return;
     setError("");
     try {
-      const response = await api.tutor({ user_id: userId, message });
+      let circuit;
+      if (circuitText.trim()) circuit = JSON.parse(circuitText);
+      const response = await api.tutor({ user_id: userId, message, circuit });
       setAnswer(response.answer);
     } catch (requestError) {
       setError(requestError.message);
@@ -31,6 +34,8 @@ function Tutor() {
       <NotebookCard label="INPUT" title="Your question" meta={userId}>
         <form className="notebook-form" onSubmit={askTutor}>
           <textarea value={message} onChange={(event) => setMessage(event.target.value)} placeholder="What are you stuck on?" rows={5} />
+          <label htmlFor="tutor-circuit">Optional active circuit JSON</label>
+          <textarea id="tutor-circuit" value={circuitText} onChange={(event) => setCircuitText(event.target.value)} rows={5} />
           <button className="primary-button" type="submit">Ask tutor</button>
         </form>
       </NotebookCard>

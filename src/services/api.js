@@ -29,4 +29,9 @@ export const api = {
     method: "PUT",
     body: JSON.stringify({ user_id: id, preferences }),
   }),
+  composer: (circuit) => request("/integrations/composer", { method: "POST", body: JSON.stringify(circuit) }),
+  jupyter: (circuit, title = "Quantum learning exercise") => request("/integrations/jupyter", {
+    method: "POST",
+    body: JSON.stringify({ circuit, title }),
+  }),
 };

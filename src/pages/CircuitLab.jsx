@@ -254,12 +254,28 @@ function CircuitLab() {
     setLoading(true);
     setError("");
     try {
-      setSimulationResult(await api.simulate(createCircuitJSON(circuit)));
+      const payload = createCircuitJSON(circuit);
+      window.localStorage.setItem("quantum_last_circuit", JSON.stringify(payload));
+      setSimulationResult(await api.simulate(payload));
     } catch (requestError) {
       setSimulationResult(null);
       setError(requestError.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const exportJupyter = async () => {
+    try {
+      const notebook = await api.jupyter(createCircuitJSON(circuit), "Circuit Lab notebook");
+      const blob = new Blob([JSON.stringify(notebook, null, 2)], { type: "application/json" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "quantum-circuit.ipynb";
+      link.click();
+      URL.revokeObjectURL(link.href);
+    } catch (requestError) {
+      setError(requestError.message);
     }
   };
 
@@ -291,6 +307,7 @@ function CircuitLab() {
           <button type="button" className="run-circuit-button" onClick={runCircuit} disabled={loading}>
             <Play size={16} /> {loading ? "Simulating..." : "Run Circuit"}
           </button>
+          <button type="button" className="clear-button" onClick={exportJupyter}>Export Jupyter</button>
         </div>
       </header>
 
