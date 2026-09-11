@@ -232,7 +232,7 @@ def validate_circuit(circuit: Circuit) -> list[str]:
 def simulate(circuit: Circuit) -> dict[str, Any]:
     """Run the validated circuit with Qiskit Aer and return simulator data."""
     try:
-        from qiskit import QuantumCircuit
+        from qiskit import QuantumCircuit, transpile
         from qiskit_aer import AerSimulator
 
         qc = QuantumCircuit(circuit.num_qubits, circuit.num_qubits)
@@ -248,14 +248,15 @@ def simulate(circuit: Circuit) -> dict[str, Any]:
                 getattr(qc, name)(*gate.params, gate.qubits[0])
             else:
                 getattr(qc, name)(gate.qubits[0])
-        statevector_circuit = qc.copy()
+        simulator = AerSimulator()
+        statevector_circuit = transpile(qc.copy(), simulator)
         statevector_circuit.save_statevector()
-        state_result = AerSimulator().run(statevector_circuit).result()
+        state_result = simulator.run(statevector_circuit).result()
         state = state_result.get_statevector().data
         probabilities = {format(i, f"0{circuit.num_qubits}b"): round(float(abs(value) ** 2), 8) for i, value in enumerate(state)}
         measurement_circuit = qc.copy()
         measurement_circuit.measure_all()
-        counts = AerSimulator().run(measurement_circuit, shots=circuit.shots).result().get_counts()
+        counts = simulator.run(transpile(measurement_circuit, simulator), shots=circuit.shots).result().get_counts()
         return {
             "engine": "qiskit-aer",
             "shots": circuit.shots,

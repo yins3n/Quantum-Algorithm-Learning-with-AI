@@ -55,6 +55,12 @@ Supported gates include single-qubit gates (`h`, `x`, `y`, `z`, `s`, `sdg`,
 `ch`), `ccx`, and `measure`. Parametric gates use a `params` array in radians;
 `rx`, `ry`, and `rz` take one value and `u` takes three.
 
+The Circuit Lab palette supports click-to-place and drag-and-drop placement.
+Multi-qubit gates are assembled in one time-step by placing the first qubit and
+then selecting the remaining wire(s); the selected-gate editor changes
+parameters for `rx`, `ry`, `rz`, and `u`. The lab serializes columns in time
+order and sends the resulting circuit directly to `POST /simulate`.
+
 The evaluator validates the circuit before simulation. It never treats an LLM
 response as mathematical truth. Qiskit Aer remains the source of simulator
 results, while Granite explains the validated result and helps the learner.
