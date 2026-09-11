@@ -59,10 +59,21 @@ Supported gates currently are:
 | `y` | One |
 | `z` | One |
 | `cx` | Two: control, target |
+| `cy` | Two: control, target |
+| `cz` | Two |
+| `swap` | Two |
+| `ch` | Two: control, target |
+| `ccx` | Three: controls, target |
+| `s`, `sdg`, `t`, `tdg` | One |
+| `rx`, `ry`, `rz` | One, with one angle in `params` |
+| `u` | One, with three angles in `params` |
 | `measure` | One |
 
 Qubit indexes are zero-based. The engine validates gate names, qubit ranges,
 gate arity, and invalid CNOT control/target combinations before simulation.
+Use `shots` on the circuit to select the number of measurement shots
+(default `1024`, maximum `100000`). `POST /simulate` returns both measurement
+counts and statevector-derived probabilities.
 
 ## 3. Frontend integration
 

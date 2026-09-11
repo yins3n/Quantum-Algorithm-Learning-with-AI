@@ -30,6 +30,7 @@ The backend uses **Granite 3.2 8B Instruct** through Ollama. Set `OLLAMA_URL`,
 | `GET /users/{id}` | Learner preferences, skill state, and recent errors |
 | `PUT /users/{id}/preferences` | Persist learning preferences |
 | `POST /evaluate` | Validate submitted code syntax/safety, validate the circuit, and run Qiskit Aer when installed |
+| `POST /simulate` | Run a validated circuit with Qiskit Aer and return counts/probabilities |
 | `POST /integrations/composer` | Convert the circuit to OpenQASM for live Composer editing |
 | `POST /integrations/jupyter` | Return a downloadable `.ipynb` notebook |
 
@@ -44,6 +45,11 @@ The shared circuit format is:
   ]
 }
 ```
+
+Supported gates include single-qubit gates (`h`, `x`, `y`, `z`, `s`, `sdg`,
+`t`, `tdg`, `rx`, `ry`, `rz`, `u`), two-qubit gates (`cx`, `cy`, `cz`, `swap`,
+`ch`), `ccx`, and `measure`. Parametric gates use a `params` array in radians;
+`rx`, `ry`, and `rz` take one value and `u` takes three.
 
 The evaluator validates the circuit before simulation. It never treats an LLM
 response as mathematical truth. Qiskit Aer remains the source of simulator

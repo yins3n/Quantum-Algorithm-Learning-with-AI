@@ -9,7 +9,7 @@ import urllib.request
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,17 +19,26 @@ ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = Path(os.getenv("QUANTUM_DB", ROOT / "data" / "platform.db"))
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "granite3.2:8b")
-SUPPORTED_GATES = {"h", "x", "y", "z", "cx", "measure"}
+SUPPORTED_GATES = {
+    "h", "x", "y", "z", "s", "sdg", "t", "tdg",
+    "rx", "ry", "rz", "u", "cx", "cy", "cz", "swap",
+    "ch", "ccx", "measure",
+}
+ONE_QUBIT_GATES = {"h", "x", "y", "z", "s", "sdg", "t", "tdg", "rx", "ry", "rz", "u", "measure"}
+TWO_QUBIT_GATES = {"cx", "cy", "cz", "swap", "ch"}
+PARAMETRIC_GATES = {"rx", "ry", "rz", "u"}
 
 
 class Gate(BaseModel):
     name: str
-    qubits: list[int] = Field(min_length=1, max_length=2)
+    qubits: list[int] = Field(min_length=1, max_length=3)
+    params: list[float] = Field(default_factory=list, max_length=3)
 
 
 class Circuit(BaseModel):
     num_qubits: int = Field(ge=1, le=20)
     gates: list[Gate] = Field(default_factory=list, max_length=200)
+    shots: int = Field(default=1024, ge=1, le=100_000)
 
 
 class UserProfile(BaseModel):
@@ -154,18 +163,21 @@ def validate_circuit(circuit: Circuit) -> list[str]:
         name = gate.name.lower()
         if name not in SUPPORTED_GATES:
             errors.append(f"Gate {index + 1}: '{gate.name}' is not supported.")
-        expected_qubits = 2 if name == "cx" else 1
+        expected_qubits = 3 if name == "ccx" else 2 if name in TWO_QUBIT_GATES else 1
         if len(gate.qubits) != expected_qubits:
             errors.append(f"Gate {index + 1}: {name.upper()} needs {expected_qubits} qubit(s).")
+        expected_params = 3 if name == "u" else 1 if name in {"rx", "ry", "rz"} else 0
+        if len(gate.params) != expected_params:
+            errors.append(f"Gate {index + 1}: {name.upper()} needs {expected_params} parameter(s).")
         if any(q < 0 or q >= circuit.num_qubits for q in gate.qubits):
             errors.append(f"Gate {index + 1}: qubit indices must be between 0 and {circuit.num_qubits - 1}.")
-        if name == "cx" and len(gate.qubits) == 2 and gate.qubits[0] == gate.qubits[1]:
-            errors.append(f"Gate {index + 1}: a CNOT control and target must differ.")
+        if len(gate.qubits) > 1 and len(set(gate.qubits)) != len(gate.qubits):
+            errors.append(f"Gate {index + 1}: a multi-qubit gate cannot target the same qubit twice.")
     return errors
 
 
 def simulate(circuit: Circuit) -> dict[str, Any]:
-    """Use Qiskit when available; otherwise provide a deterministic small-circuit fallback."""
+    """Run the validated circuit with Qiskit Aer and return simulator data."""
     try:
         from qiskit import QuantumCircuit
         from qiskit_aer import AerSimulator
@@ -174,19 +186,31 @@ def simulate(circuit: Circuit) -> dict[str, Any]:
         for gate in circuit.gates:
             name = gate.name.lower()
             if name == "measure":
-                qc.measure(gate.qubits[0], gate.qubits[0])
-            elif name == "cx":
-                qc.cx(*gate.qubits)
+                continue
+            if name == "ccx":
+                qc.ccx(*gate.qubits)
+            elif name in TWO_QUBIT_GATES:
+                getattr(qc, name)(*gate.qubits)
+            elif name in PARAMETRIC_GATES:
+                getattr(qc, name)(*gate.params, gate.qubits[0])
             else:
                 getattr(qc, name)(gate.qubits[0])
-        qc.save_statevector()
-        result = AerSimulator().run(qc).result()
-        state = result.get_statevector().data
-        probabilities = {format(i, f"0{circuit.num_qubits}b"): round(abs(value) ** 2, 8) for i, value in enumerate(state)}
-        return {"engine": "qiskit-aer", "probabilities": probabilities}
+        statevector_circuit = qc.copy()
+        statevector_circuit.save_statevector()
+        state_result = AerSimulator().run(statevector_circuit).result()
+        state = state_result.get_statevector().data
+        probabilities = {format(i, f"0{circuit.num_qubits}b"): round(float(abs(value) ** 2), 8) for i, value in enumerate(state)}
+        measurement_circuit = qc.copy()
+        measurement_circuit.measure_all()
+        counts = AerSimulator().run(measurement_circuit, shots=circuit.shots).result().get_counts()
+        return {
+            "engine": "qiskit-aer",
+            "shots": circuit.shots,
+            "counts": counts,
+            "probabilities": probabilities,
+        }
     except ImportError:
-        # Keeps the API usable before optional Qiskit dependencies are installed.
-        return {"engine": "validation-only", "probabilities": None, "message": "Install qiskit and qiskit-aer for live simulation."}
+        return {"engine": "unavailable", "probabilities": None, "message": "Install qiskit and qiskit-aer to run Aer simulation."}
 
 
 def call_granite(prompt: str) -> str:
@@ -213,10 +237,13 @@ def qasm(circuit: Circuit) -> str:
         name = gate.name.lower()
         if name == "measure":
             lines.append(f"measure q[{gate.qubits[0]}] -> c[{gate.qubits[0]}];")
-        elif name == "cx":
-            lines.append(f"cx q[{gate.qubits[0]}],q[{gate.qubits[1]}];")
+        elif name == "ccx":
+            lines.append(f"ccx q[{gate.qubits[0]}],q[{gate.qubits[1]}],q[{gate.qubits[2]}];")
+        elif name in TWO_QUBIT_GATES:
+            lines.append(f"{name} q[{gate.qubits[0]}],q[{gate.qubits[1]}];")
         else:
-            lines.append(f"{name} q[{gate.qubits[0]}];")
+            params = f"({','.join(map(str, gate.params))})" if gate.params else ""
+            lines.append(f"{name}{params} q[{gate.qubits[0]}];")
     return "\n".join(lines)
 
 
@@ -276,6 +303,14 @@ def evaluate(request: EvaluateRequest) -> dict[str, Any]:
     connection.commit()
     connection.close()
     return {"passed": passed, "feedback": feedback, "simulation": simulation}
+
+
+@app.post("/simulate")
+def run_simulation(circuit: Circuit) -> dict[str, Any]:
+    errors = validate_circuit(circuit)
+    if errors:
+        raise HTTPException(status_code=422, detail=errors)
+    return simulate(circuit)
 
 
 @app.post("/integrations/composer")
