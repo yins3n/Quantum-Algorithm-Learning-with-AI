@@ -27,6 +27,7 @@ The backend uses **Granite 3.2 8B Instruct** through Ollama. Set `OLLAMA_URL`,
 | Endpoint | Purpose |
 | --- | --- |
 | `POST /tutor` | Adaptive Granite tutor and circuit debugging |
+| `GET /knowledge/search` | Search the trusted local quantum knowledge base |
 | `GET /users/{id}` | Learner preferences, skill state, and recent errors |
 | `PUT /users/{id}/preferences` | Persist learning preferences |
 | `POST /evaluate` | Validate submitted code syntax/safety, validate the circuit, and run Qiskit Aer when installed |
@@ -61,6 +62,20 @@ The current evaluator establishes the CodeChef-style execution contract; a
 curriculum can add exercise-specific checks without changing the frontend
 integration. Exercise pass/fail is determined by circuit validation and
 Qiskit Aer results; Granite is not used as an evaluator.
+
+## Retrieval and reasoning
+
+The tutor uses a dependency-free local retrieval layer in `backend/rag.py`.
+It retrieves trusted quantum notes and platform rules, then sends them to
+Granite alongside validated circuit errors and Aer results. This is RAG for
+grounding, not a replacement for the simulator. Add reviewed knowledge chunks
+there as the curriculum grows.
+
+The tutor returns short `teaching_steps` that describe observable educational
+steps. It does not expose hidden chain-of-thought. The engine performs
+validation and simulation first, constrains Granite to JSON, validates the
+response with Pydantic, applies low-temperature/repetition controls, and uses
+a deterministic fallback if Ollama is unavailable or returns invalid JSON.
 
 ## Safety and persistence
 

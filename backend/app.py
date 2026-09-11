@@ -14,6 +14,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from backend.rag import KnowledgeChunk, retrieve
 
 ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = Path(os.getenv("QUANTUM_DB", ROOT / "data" / "platform.db"))
@@ -50,6 +51,16 @@ class TutorRequest(BaseModel):
     user_id: str
     message: str = Field(min_length=1, max_length=6000)
     circuit: Circuit | None = None
+
+
+class TutorResponse(BaseModel):
+    explanation: str
+    error_category: str
+    hint: str
+    suggested_fix: dict[str, Any] | None = None
+    next_step: str
+    teaching_steps: list[str] = Field(default_factory=list, max_length=4)
+    sources: list[str] = Field(default_factory=list, max_length=3)
 
 
 class EvaluateRequest(BaseModel):
@@ -255,22 +266,65 @@ def simulate(circuit: Circuit) -> dict[str, Any]:
         return {"engine": "unavailable", "probabilities": None, "message": "Install qiskit and qiskit-aer to run Aer simulation."}
 
 
-def call_granite(prompt: str) -> str:
+def fallback_tutor(errors: list[str], simulation: dict[str, Any] | None, sources: list[KnowledgeChunk]) -> TutorResponse:
+    if errors:
+        explanation = errors[0]
+        category = "circuit_validation"
+        hint = "Read the gate-level error, then correct one issue before submitting again."
+    elif simulation and simulation.get("probabilities") is not None:
+        explanation = "The circuit was validated and its simulator results are available below."
+        category = "none"
+        hint = "Compare the measured outcomes with the exercise objective."
+    else:
+        explanation = "The circuit facts are available, but a simulator result is required for a quantum explanation."
+        category = "simulator_unavailable"
+        hint = "Start Qiskit Aer and run the circuit again."
+    return TutorResponse(
+        explanation=explanation,
+        error_category=category,
+        hint=hint,
+        next_step="Make one small change and run the circuit again.",
+        teaching_steps=["Validate the circuit.", "Use only simulator-confirmed results.", "Apply one correction and retry."],
+        sources=[chunk.title for chunk in sources],
+    )
+
+
+def call_granite(prompt: str, fallback: TutorResponse) -> TutorResponse:
     payload = json.dumps({
         "model": OLLAMA_MODEL,
         "stream": False,
         "messages": [
-            {"role": "system", "content": "You are a patient quantum-computing tutor. Explain errors clearly, ask guiding questions, and adapt to the learner profile. Never invent simulator results."},
+            {"role": "system", "content": "You are a patient quantum-computing tutor. Use only VERIFIED_ENGINE_FACTS and TRUSTED_KNOWLEDGE. Never invent simulator results, scores, gates, or citations. Return only valid JSON with keys explanation, error_category, hint, suggested_fix, next_step, teaching_steps, and sources. teaching_steps must be 1-4 concise, observable teaching actions; do not reveal private chain-of-thought. Avoid repeating previous_errors; advance the learner one step."},
             {"role": "user", "content": prompt},
         ],
-        "options": {"temperature": 0.2},
+        "format": "json",
+        "options": {"temperature": 0.15, "top_p": 0.8, "repeat_penalty": 1.15, "repeat_last_n": 256},
     }).encode()
     request = urllib.request.Request(f"{OLLAMA_URL}/api/chat", data=payload, headers={"Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(request, timeout=45) as response:
-            return json.loads(response.read())["message"]["content"]
+            raw = json.loads(response.read())["message"]["content"]
+            parsed = TutorResponse.model_validate_json(raw)
+            return parsed
     except (urllib.error.URLError, TimeoutError) as error:
-        raise HTTPException(status_code=503, detail=f"Granite is unavailable at {OLLAMA_URL}. Start Ollama and load {OLLAMA_MODEL}.") from error
+        return fallback
+    except (json.JSONDecodeError, KeyError, ValueError):
+        return fallback
+
+
+def tutor_context(request: TutorRequest, learner: dict[str, Any], errors: list[str], simulation: dict[str, Any] | None, sources: list[KnowledgeChunk]) -> str:
+    return json.dumps({
+        "VERIFIED_ENGINE_FACTS": {
+            "validation_errors": errors,
+            "simulation": simulation,
+            "evaluator_passed": not errors if simulation is not None else None,
+        },
+        "TRUSTED_KNOWLEDGE": [{"title": item.title, "text": item.text, "source": item.source} for item in sources],
+        "learner_profile": learner,
+        "question": request.message,
+        "previous_errors": learner["recent_errors"][-3:],
+        "circuit": request.circuit.model_dump() if request.circuit else None,
+    }, indent=2)
 
 
 def qasm(circuit: Circuit) -> str:
@@ -369,7 +423,16 @@ def submit_exercise(exercise: Exercise, request: ExerciseSubmission) -> dict[str
 
 @app.get("/health")
 def health() -> dict[str, Any]:
-    return {"status": "ok", "llm": OLLAMA_MODEL, "qiskit": "optional"}
+    return {"status": "ok", "llm": OLLAMA_MODEL, "qiskit": "optional", "rag": "local"}
+
+
+@app.get("/knowledge/search")
+def search_knowledge(query: str, limit: int = 3) -> list[dict[str, Any]]:
+    if not query.strip():
+        raise HTTPException(status_code=400, detail="query must not be empty.")
+    if limit < 1 or limit > 5:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 5.")
+    return [chunk.__dict__ for chunk in retrieve(query, limit)]
 
 
 @app.get("/exercises")
@@ -412,8 +475,17 @@ def put_preferences(user_id: str, request: UserProfile) -> dict[str, Any]:
 def tutor(request: TutorRequest) -> dict[str, Any]:
     learner = profile(request.user_id)
     errors = validate_circuit(request.circuit) if request.circuit else []
-    prompt = json.dumps({"learner_profile": learner, "question": request.message, "circuit": request.circuit.model_dump() if request.circuit else None, "validated_errors": errors}, indent=2)
-    return {"answer": call_granite(prompt), "validated_errors": errors, "learner_profile": learner}
+    simulation = simulate(request.circuit) if request.circuit and not errors else None
+    sources = retrieve(f"{request.message} {' '.join(errors)}")
+    fallback = fallback_tutor(errors, simulation, sources)
+    answer = call_granite(tutor_context(request, learner, errors, simulation, sources), fallback)
+    return {
+        "answer": answer.model_dump(),
+        "validated_errors": errors,
+        "simulation": simulation,
+        "retrieved_sources": [chunk.title for chunk in sources],
+        "learner_profile": learner,
+    }
 
 
 @app.post("/evaluate")

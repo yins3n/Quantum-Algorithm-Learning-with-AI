@@ -4,8 +4,9 @@ This guide explains how backend and frontend developers can integrate the
 quantum-learning engine into the main application.
 
 The engine runs as an independent FastAPI service. It provides the Granite
-3.2 8B Instruct tutor, learner-profile persistence, circuit validation,
-Qiskit Aer simulation, Qiskit Composer export, and Jupyter notebook export.
+3.2 8B Instruct tutor, local trusted-note retrieval (RAG), learner-profile
+persistence, circuit validation, Qiskit Aer simulation, Qiskit Composer
+export, and Jupyter notebook export.
 
 ## 1. Start the engine locally
 
@@ -35,6 +36,10 @@ The frontend should use the deployed engine URL in production, for example:
 ```env
 VITE_QUANTUM_ENGINE_URL=https://engine.example.com
 ```
+
+Tutor responses are grounded with `GET /knowledge/search` results and
+deterministic validation/Aer facts. They return concise `teaching_steps`, not
+private chain-of-thought.
 
 ## 2.1 CodeChef-style exercises
 
