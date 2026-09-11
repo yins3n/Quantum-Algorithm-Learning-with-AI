@@ -83,3 +83,9 @@ Learner preferences and attempt feedback are stored in `data/platform.db`
 (SQLite). AI-generated Python is not executed by the API. The supported gate
 DSL is validated first, which provides a safe foundation for adding isolated
 exercise runners later.
+
+The frontend's registration portal creates a learner profile through
+`PUT /users/{id}/preferences` and stores the selected learner ID locally for
+subsequent tutor and exercise requests. This is intentionally a profile
+onboarding flow, not an authentication system: the backend does not issue
+passwords, sessions, tokens, or other auth claims.

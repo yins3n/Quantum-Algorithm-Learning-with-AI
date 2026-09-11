@@ -49,6 +49,7 @@
 
 .clear-button,
 .run-circuit-button {
+  border: 1px solid transparent;
   border-radius: 9px;
   padding: 10px 15px;
   display: flex;
@@ -64,10 +65,19 @@
 }
 
 .run-circuit-button {
-  border: 0;
   background: #747fff;
   color: white;
   font-weight: 600;
+}
+
+.run-circuit-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.clear-button:hover {
+  border-color: #4a5573;
+  color: #e0e4f1;
 }
 
 
@@ -114,6 +124,9 @@
 }
 
 .gate-item {
+  width: 100%;
+  color: inherit;
+  text-align: left;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -127,6 +140,12 @@
 .gate-item:hover {
   border-color: #5862a5;
   background: #191e2b;
+}
+
+.selected-gate-item {
+  border-color: #7885f4;
+  background: #202844;
+  box-shadow: 0 0 0 2px rgba(120, 133, 244, 0.12);
 }
 
 .gate-symbol {
@@ -290,6 +309,7 @@
 ========================= */
 
 .quantum-circuit {
+  position: relative;
   padding: 35px 25px;
   min-width: 700px;
 }
@@ -375,6 +395,23 @@
   cursor: pointer;
 }
 
+.cnot-connectors {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.cnot-connector {
+  position: absolute;
+  z-index: 1;
+  left: calc(65px + (var(--connector-column) * 70px) + 35px);
+  top: calc(84px + (var(--connector-control) * 100px));
+  width: 2px;
+  height: calc(var(--connector-span) * 100px);
+  background: #68cdb8;
+  opacity: 0.8;
+}
+
 .circuit-cell:hover {
   background: rgba(100, 110, 180, 0.08);
 }
@@ -403,6 +440,15 @@
   font-size: 13px;
   font-weight: 700;
   box-shadow: 0 0 20px rgba(100, 110, 255, 0.12);
+}
+
+.placed-cnot {
+  border-radius: 50%;
+  border-color: #65cdb5;
+  color: #9ee4d4;
+  background: #1b353b;
+  font-size: 21px;
+  box-shadow: 0 0 18px rgba(101, 205, 181, 0.14);
 }
 
 

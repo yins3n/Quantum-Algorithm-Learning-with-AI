@@ -137,7 +137,13 @@ function CircuitLab() {
 
     const newCircuit = circuit.map((row) => [...row]);
 
-    newCircuit[qubit][column] = null;
+    if (newCircuit[qubit][column]?.toLowerCase() === "cnot") {
+      newCircuit.forEach((row) => {
+        if (row[column]?.toLowerCase() === "cnot") row[column] = null;
+      });
+    } else {
+      newCircuit[qubit][column] = null;
+    }
 
     setCircuit(newCircuit);
 
@@ -173,6 +179,15 @@ function CircuitLab() {
     .flat()
     .filter(Boolean)
     .length;
+
+  const cnotLinks = Array.from({ length: NUMBER_OF_COLUMNS }, (_, column) => {
+    const qubits = circuit
+      .map((row, qubit) => row[column] === "CNOT" ? qubit : null)
+      .filter((qubit) => qubit !== null);
+    return qubits.length === 2
+      ? { column, control: qubits[0], target: qubits[1] }
+      : null;
+  }).filter(Boolean);
 
 
   /* =========================
@@ -242,6 +257,7 @@ function CircuitLab() {
         <div className="circuit-actions">
 
           <button
+            type="button"
             className="clear-button"
             onClick={clearCircuit}
           >
@@ -254,8 +270,10 @@ function CircuitLab() {
 
 
           <button
+            type="button"
             className="run-circuit-button"
             onClick={runCircuit}
+            disabled={loading}
           >
 
             <Play size={16} />
@@ -291,7 +309,7 @@ function CircuitLab() {
             </h2>
 
             <p>
-              Select a gate and click a circuit slot
+              Composer-style grid · choose a gate and click a slot
             </p>
 
           </div>
@@ -301,16 +319,18 @@ function CircuitLab() {
 
             {GATES.map((gate) => (
 
-              <div
+              <button
                 key={gate.name}
+                type="button"
                 className={`gate-item ${
                   selectedGate === gate.name
                     ? "selected-gate-item"
                     : ""
                 }`}
                 onClick={() =>
-                  setSelectedGate(gate.name)
+                  setSelectedGate((current) => current === gate.name ? null : gate.name)
                 }
+                aria-pressed={selectedGate === gate.name}
               >
 
                 <div className="gate-symbol">
@@ -333,7 +353,7 @@ function CircuitLab() {
 
                 <Plus size={15} />
 
-              </div>
+              </button>
 
             ))}
 
@@ -348,12 +368,10 @@ function CircuitLab() {
 
             <div className="selected-gate">
 
-              <span>
-                Selected Gate
-              </span>
+              <span>{pendingCnot ? "CNOT placement" : "Selected gate"}</span>
 
               <strong>
-                {selectedGate}
+                {pendingCnot ? "Choose target" : selectedGate}
               </strong>
 
             </div>
@@ -392,8 +410,8 @@ function CircuitLab() {
             </strong>
 
             <p>
-              Select a quantum gate from this
-              panel and click a circuit slot.
+              Choose a gate, then click a slot in the grid. CNOT uses two
+              slots in one column; click the second qubit to complete it.
             </p>
 
           </div>
@@ -421,7 +439,7 @@ function CircuitLab() {
               </span>
 
               <small>
-                {circuit.length} qubits
+                {circuit.length} qubits · {NUMBER_OF_COLUMNS} steps
               </small>
 
             </div>
@@ -460,7 +478,7 @@ function CircuitLab() {
             <div className="column-header">
 
               <div className="qubit-header">
-                Qubit
+                Qubit / step
               </div>
 
 
@@ -522,6 +540,9 @@ function CircuitLab() {
                           const isSelected =
                             selectedCell?.qubit === qubit &&
                             selectedCell?.column === column;
+                          const cnotQubits = circuit
+                            .map((otherRow, index) => otherRow[column] === "CNOT" ? index : null)
+                            .filter((index) => index !== null);
 
 
                           return (
@@ -544,13 +565,11 @@ function CircuitLab() {
                             >
 
                               {gate && (
-
-                                <div className="placed-gate">
-
-                                  {gate}
-
+                                <div className={`placed-gate ${gate === "CNOT" ? "placed-cnot" : ""}`}>
+                                  {gate === "CNOT"
+                                    ? (cnotQubits[0] === qubit ? "●" : "⊕")
+                                    : gate}
                                 </div>
-
                               )}
 
                             </div>
@@ -568,6 +587,20 @@ function CircuitLab() {
 
               )
             )}
+
+            <div className="cnot-connectors" aria-hidden="true">
+              {cnotLinks.map(({ column, control, target }) => (
+                <span
+                  className="cnot-connector"
+                  key={`${column}-${control}-${target}`}
+                  style={{
+                    "--connector-column": column,
+                    "--connector-control": control,
+                    "--connector-span": target - control,
+                  }}
+                />
+              ))}
+            </div>
 
           </div>
 
@@ -593,8 +626,7 @@ function CircuitLab() {
 
 
               <p>
-                Select a quantum gate from the
-                left panel and click a circuit slot.
+                Select a gate from the palette, then click a slot on a wire.
               </p>
 
             </div>

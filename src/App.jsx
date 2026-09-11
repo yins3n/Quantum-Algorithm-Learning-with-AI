@@ -1,4 +1,5 @@
-import { BrowserRouter, Routes, Route, Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { BrowserRouter, Routes, Route, NavLink } from "react-router-dom";
 
 import {
   LayoutDashboard,
@@ -17,10 +18,20 @@ import CircuitLab from "./pages/CircuitLab";
 import Challenges from "./pages/Challenges";
 import Tutor from "./pages/Tutor";
 import ChallengeDetail from "./pages/ChallengeDetail";
+import Registration from "./pages/Registration";
+import { getCurrentUserProfile } from "./services/user";
 import "./App.css";
 
 
 function App() {
+  const [profile, setProfile] = useState(getCurrentUserProfile);
+
+  useEffect(() => {
+    const handleProfileUpdate = () => setProfile(getCurrentUserProfile());
+    window.addEventListener("quantum-profile-updated", handleProfileUpdate);
+    return () => window.removeEventListener("quantum-profile-updated", handleProfileUpdate);
+  }, []);
+
   return (
     <BrowserRouter>
 
@@ -46,35 +57,35 @@ function App() {
           {/* NAVIGATION */}
           <nav className="nav">
 
-            <Link to="/" className="nav-item">
+            <NavLink to="/" end className="nav-item">
               <LayoutDashboard size={20} />
               <span>Dashboard</span>
-            </Link>
+            </NavLink>
 
-            <Link to="/learn" className="nav-item">
+            <NavLink to="/learn" className="nav-item">
               <BookOpen size={20} />
               <span>Learn</span>
-            </Link>
+            </NavLink>
 
-            <Link to="/circuit-lab" className="nav-item">
+            <NavLink to="/circuit-lab" className="nav-item">
               <CircuitBoard size={20} />
               <span>Circuit Lab</span>
-            </Link>
+            </NavLink>
 
-            <Link to="/challenges" className="nav-item">
+            <NavLink to="/challenges" className="nav-item">
               <Trophy size={20} />
               <span>Challenges</span>
-            </Link>
+            </NavLink>
 
-            <Link to="/ai-tutor" className="nav-item">
+            <NavLink to="/ai-tutor" className="nav-item">
               <Bot size={20} />
               <span>AI Tutor</span>
-            </Link>
+            </NavLink>
 
-            <Link to="/progress" className="nav-item">
+            <NavLink to="/progress" className="nav-item">
               <BarChart3 size={20} />
               <span>Progress</span>
-            </Link>
+            </NavLink>
 
           </nav>
 
@@ -82,20 +93,20 @@ function App() {
           {/* BOTTOM */}
           <div className="sidebar-bottom">
 
-            <div className="nav-item">
+            <NavLink to="/register" className="nav-item">
               <Settings size={20} />
-              <span>Settings</span>
-            </div>
+              <span>Profile settings</span>
+            </NavLink>
 
             <div className="profile">
 
               <div className="avatar">
-                SH
+                {profile.displayName.slice(0, 2).toUpperCase()}
               </div>
 
               <div>
-                <strong>Sri Harsha</strong>
-                <span>Quantum Learner</span>
+                <strong>{profile.displayName}</strong>
+                <span>Quantum learner</span>
               </div>
 
             </div>
@@ -130,6 +141,7 @@ function App() {
               element={<Challenges />}
             />
             <Route path="/challenges/:exerciseId" element={<ChallengeDetail />} />
+            <Route path="/register" element={<Registration />} />
 
             <Route
               path="/ai-tutor"

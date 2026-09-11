@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { api } from "../services/api";
+import NotebookCard from "../components/NotebookCard";
+import { getCurrentUserId } from "../services/user";
 
 function ChallengeDetail() {
   const { exerciseId } = useParams();
@@ -23,7 +25,7 @@ function ChallengeDetail() {
     setError("");
     try {
       const parsed = JSON.parse(circuit);
-      setResult(await api.submitExercise(exerciseId, { user_id: "demo-user", circuit: parsed }));
+      setResult(await api.submitExercise(exerciseId, { user_id: getCurrentUserId(), circuit: parsed }));
     } catch (submissionError) {
       setError(submissionError instanceof SyntaxError ? "Circuit JSON is invalid." : submissionError.message);
     }
@@ -34,20 +36,39 @@ function ChallengeDetail() {
 
   return (
     <div className="page-content">
-      <h1>{exercise.title}</h1>
-      <p>{exercise.description}</p>
-      <form onSubmit={submit}>
-        <label htmlFor="challenge-circuit">Circuit JSON</label>
-        <textarea id="challenge-circuit" value={circuit} onChange={(event) => setCircuit(event.target.value)} rows={14} />
-        <button type="submit">Submit solution</button>
-      </form>
-      {error && <p role="alert">{error}</p>}
+      <header className="page-hero">
+        <p className="page-label">CHALLENGE / {exercise.difficulty.toUpperCase()}</p>
+        <h1>{exercise.title}</h1>
+        <p>{exercise.description}</p>
+      </header>
+      <NotebookCard label="CODE" title="Circuit definition" meta={`${exercise.num_qubits} qubits`}>
+        <form className="notebook-form" onSubmit={submit}>
+          <label htmlFor="challenge-circuit">Shared circuit JSON</label>
+          <textarea id="challenge-circuit" value={circuit} onChange={(event) => setCircuit(event.target.value)} rows={14} />
+          <button className="primary-button" type="submit">Submit solution</button>
+        </form>
+      </NotebookCard>
+      {error && <p className="inline-error" role="alert">{error}</p>}
       {result && (
-        <section className="action-card">
-          <h2>{result.passed ? "Passed" : "Not passed"} — {result.score}/100</h2>
-          {result.feedback.map((item) => <p key={item}>{item}</p>)}
-          <pre>{JSON.stringify(result.simulation, null, 2)}</pre>
-        </section>
+        <div className="notebook-stack">
+          <NotebookCard label="RESULT" title={result.passed ? "Challenge passed" : "Keep iterating"} meta={`${result.score}/100`}>
+            <div className={`result-banner ${result.passed ? "passed" : "needs-work"}`}>
+              <strong>{result.passed ? "All public checks passed." : "Some checks need attention."}</strong>
+            </div>
+            <ul className="feedback-list">{result.feedback.map((item) => <li key={item}>{item}</li>)}</ul>
+          </NotebookCard>
+          {result.simulation && (
+            <NotebookCard label="OUTPUT" title="Simulation snapshot" meta={result.simulation.engine}>
+              <div className="result-metrics">
+                <span><strong>{result.simulation.shots ?? "—"}</strong> shots</span>
+                <span><strong>{Object.keys(result.simulation.counts || {}).length}</strong> observed states</span>
+              </div>
+              <div className="counts-grid">
+                {Object.entries(result.simulation.counts || {}).map(([state, count]) => <div className="count-chip" key={state}><span>|{state}⟩</span><strong>{count}</strong></div>)}
+              </div>
+            </NotebookCard>
+          )}
+        </div>
       )}
     </div>
   );

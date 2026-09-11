@@ -8,6 +8,7 @@ import {
   Play,
   Sparkles,
 } from "lucide-react";
+import { Link } from "react-router-dom";
 
 function Dashboard() {
   return (
@@ -19,10 +20,10 @@ function Dashboard() {
           <h1>Welcome back 👋</h1>
         </div>
 
-        <button className="run-button">
+        <Link className="run-button" to="/circuit-lab">
           <Play size={17} />
           Open Circuit Lab
-        </button>
+        </Link>
       </header>
 
       {/* HERO */}
@@ -44,10 +45,10 @@ function Dashboard() {
             and understand the results with your AI tutor.
           </p>
 
-          <button className="primary-button">
+          <Link className="primary-button" to="/learn">
             Start Learning
             <ArrowRight size={18} />
-          </button>
+          </Link>
 
         </div>
 
@@ -81,10 +82,10 @@ function Dashboard() {
               drag-and-drop canvas.
             </p>
 
-            <button>
+            <Link to="/circuit-lab">
               Build Circuit
               <ArrowRight size={16} />
-            </button>
+            </Link>
 
           </div>
 
@@ -101,10 +102,10 @@ function Dashboard() {
               and strengthen your concepts.
             </p>
 
-            <button>
+            <Link to="/learn">
               Continue
               <ArrowRight size={16} />
-            </button>
+            </Link>
 
           </div>
 
@@ -121,10 +122,10 @@ function Dashboard() {
               debug code, and understand quantum concepts.
             </p>
 
-            <button>
+            <Link to="/ai-tutor">
               Ask Tutor
               <ArrowRight size={16} />
-            </button>
+            </Link>
 
           </div>
 
@@ -141,10 +142,10 @@ function Dashboard() {
             <p>Keep building your quantum knowledge.</p>
           </div>
 
-          <button className="view-button">
+          <Link className="view-button" to="/progress">
             View Progress
             <ArrowRight size={16} />
-          </button>
+          </Link>
 
         </div>
 

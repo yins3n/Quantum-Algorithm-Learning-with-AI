@@ -1,0 +1,83 @@
+.notebook-card {
+  display: flex;
+  overflow: hidden;
+  border: 1px solid #293044;
+  border-radius: 14px;
+  background: #111622;
+  box-shadow: 0 12px 30px rgba(4, 7, 15, 0.18);
+}
+
+.notebook-card-gutter {
+  width: 38px;
+  flex: 0 0 38px;
+  padding-top: 20px;
+  border-right: 1px solid #222a3b;
+  background: #0d111b;
+}
+
+.notebook-card-gutter span {
+  display: block;
+  width: 5px;
+  height: 5px;
+  margin: 0 auto 5px;
+  border-radius: 50%;
+  background: #4a5572;
+}
+
+.notebook-card-content {
+  min-width: 0;
+  flex: 1;
+  padding: 18px 20px 20px;
+}
+
+.notebook-card-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 15px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.notebook-cell-label {
+  color: #7f8cff;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.notebook-card h3 {
+  margin: 5px 0 0;
+  color: #f4f6fc;
+  font-size: 15px;
+}
+
+.notebook-card-meta {
+  color: #81899d;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.notebook-card-body {
+  color: #c0c7d8;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.notebook-card-body p {
+  margin: 0 0 10px;
+}
+
+.notebook-card-body p:last-child {
+  margin-bottom: 0;
+}
+
+.notebook-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 19px;
+}
+
+.notebook-list li::marker {
+  color: #8995ff;
+}

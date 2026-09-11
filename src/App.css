@@ -14,6 +14,14 @@ button {
   cursor: pointer;
 }
 
+button,
+a,
+input,
+select,
+textarea {
+  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease, transform 0.18s ease;
+}
+
 .app {
   min-height: 100vh;
   display: flex;
@@ -99,6 +107,10 @@ button {
   color: #9ca8ff;
 }
 
+.nav-item.active svg {
+  color: #aab3ff;
+}
+
 .sidebar-bottom {
   margin-top: auto;
 }
@@ -145,6 +157,121 @@ button {
   padding: 30px 40px 60px;
 }
 
+.page-content {
+  max-width: 980px;
+  margin: 0 auto;
+}
+
+.page-hero {
+  margin-bottom: 23px;
+}
+
+.page-hero h1 {
+  margin: 0;
+  font-size: 28px;
+  letter-spacing: -0.5px;
+}
+
+.page-hero > p:last-child {
+  margin: 8px 0 0;
+  color: #8b94a8;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.notebook-stack {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.notebook-form {
+  display: grid;
+  gap: 11px;
+}
+
+.notebook-form label {
+  color: #cbd1df;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.notebook-form textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #30394e;
+  border-radius: 9px;
+  outline: 0;
+  padding: 12px;
+  color: #d9ddec;
+  background: #0c1019;
+  font: 12px/1.6 "SFMono-Regular", Consolas, monospace;
+  resize: vertical;
+}
+
+.notebook-form textarea:focus {
+  border-color: #7784f3;
+  box-shadow: 0 0 0 3px rgba(119, 132, 243, 0.12);
+}
+
+.inline-error {
+  margin: 14px 0;
+  padding: 11px 13px;
+  border: 1px solid #5a3344;
+  border-radius: 9px;
+  color: #eca9bb;
+  background: #241720;
+  font-size: 12px;
+}
+
+.tutor-callout {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-left: 2px solid #7784f3;
+  color: #aeb7ca;
+  background: #171d2d;
+  font-size: 12px;
+}
+
+.tutor-callout strong {
+  color: #aab3ff;
+}
+
+.result-banner {
+  margin-bottom: 13px;
+  padding: 11px 13px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.result-banner.passed {
+  border: 1px solid #2d665b;
+  color: #9be0cb;
+  background: #142b2b;
+}
+
+.result-banner.needs-work {
+  border: 1px solid #614153;
+  color: #e9adbd;
+  background: #281b25;
+}
+
+.feedback-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 19px;
+  color: #b7c0d2;
+  font-size: 12px;
+}
+
+.feedback-list li::marker {
+  color: #8e9aff;
+}
+
 .topbar {
   display: flex;
   justify-content: space-between;
@@ -175,6 +302,7 @@ button {
   align-items: center;
   gap: 8px;
   font-size: 13px;
+  text-decoration: none;
 }
 
 .run-button:hover {
@@ -247,6 +375,7 @@ button {
   gap: 8px;
   font-size: 13px;
   font-weight: 600;
+  text-decoration: none;
 }
 
 .primary-button:hover {
@@ -358,6 +487,23 @@ button {
   font-size: 12px;
 }
 
+.action-card a {
+  border: 0;
+  background: transparent;
+  color: #9ba5ff;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.action-card a:hover,
+.view-button:hover {
+  color: #c1c7ff;
+}
+
 
 /* =========================
    PROGRESS
@@ -371,6 +517,7 @@ button {
   align-items: center;
   gap: 6px;
   font-size: 12px;
+  text-decoration: none;
 }
 
 .progress-card {
@@ -476,6 +623,15 @@ button {
     width: 100%;
     margin-left: 0;
     padding: 20px;
+  }
+
+  .page-hero h1 {
+    font-size: 24px;
+  }
+
+  .tutor-callout {
+    grid-template-columns: 1fr;
+    gap: 3px;
   }
 
   .hero {

@@ -1,197 +1,82 @@
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from "recharts";
-
+import NotebookCard from "../NotebookCard";
 import "./SimulationResults.css";
 
-
 function SimulationResults({ result }) {
-
   if (!result) {
     return (
       <div className="simulation-results empty">
-
-        <h3>
-          Simulation Results
-        </h3>
-
-        <p>
-          Run your circuit to see simulation results here.
-        </p>
-
+        <div className="simulation-empty-icon">∿</div>
+        <h3>Simulation notebook</h3>
+        <p>Run your circuit to create a readable measurement output.</p>
       </div>
     );
   }
 
+  const probabilities = Object.entries(result.probabilities || {})
+    .map(([state, probability]) => ({ state, probability: Number(probability) * 100 }))
+    .sort((a, b) => b.probability - a.probability);
+  const counts = Object.entries(result.counts || {}).sort(([, a], [, b]) => b - a);
 
-  /* =========================
-     CONVERT PROBABILITIES
-     INTO CHART DATA
-  ========================= */
-
-  const chartData = Object.entries(
-    result.probabilities || {}
-  ).map(([state, probability]) => ({
-    state: state,
-    probability: probability * 100,
-  }));
-
+  if (!result.probabilities && result.message) {
+    return (
+      <div className="simulation-results">
+        <NotebookCard label="OUTPUT" title="Simulation unavailable" meta={result.engine}>
+          <p>{result.message}</p>
+        </NotebookCard>
+      </div>
+    );
+  }
 
   return (
     <div className="simulation-results">
-
-      <h3>
-        Simulation Results
-      </h3>
-
-
-      {/* =========================
-          PROBABILITY CHART
-      ========================= */}
-
-      <div className="result-section">
-
-        <h4>
-          Measurement Probabilities
-        </h4>
-
-        <div
-          className="probability-chart"
-          style={{
-            width: "100%",
-            height: "300px",
-          }}
-        >
-
-          <ResponsiveContainer
-            width="100%"
-            height="100%"
-          >
-
-            <BarChart
-              data={chartData}
-              margin={{
-                top: 20,
-                right: 20,
-                left: 10,
-                bottom: 20,
-              }}
-            >
-
-              <CartesianGrid
-                strokeDasharray="3 3"
-              />
-
-              <XAxis
-                dataKey="state"
-                label={{
-                  value: "Quantum State",
-                  position: "insideBottom",
-                  offset: -10,
-                }}
-              />
-
-              <YAxis
-                domain={[0, 100]}
-                label={{
-                  value: "Probability (%)",
-                  angle: -90,
-                  position: "insideLeft",
-                }}
-              />
-
-              <Tooltip
-                formatter={(value) => [
-                  `${Number(value).toFixed(1)}%`,
-                  "Probability",
-                ]}
-              />
-
-              <Bar
-                dataKey="probability"
-                name="Probability"
-                radius={[6, 6, 0, 0]}
-              />
-
-            </BarChart>
-
-          </ResponsiveContainer>
-
+      <div className="simulation-heading">
+        <div>
+          <p className="page-label">NOTEBOOK / OUTPUT</p>
+          <h2>Simulation results</h2>
         </div>
+        <span className="engine-pill">{result.engine || "simulator"}</span>
+      </div>
 
+      <div className="simulation-notebook-grid">
+        <NotebookCard label="SUMMARY" title="Run overview" meta={`${result.shots ?? "—"} shots`}>
+          <div className="result-metrics">
+            <span><strong>{result.shots ?? "—"}</strong> total shots</span>
+            <span><strong>{counts.length}</strong> measured states</span>
+          </div>
+          <p className="notebook-muted">The bars below show the ideal state probabilities returned by the simulator.</p>
+        </NotebookCard>
 
-        {/* =========================
-            PROBABILITY VALUES
-        ========================= */}
-
-        <div className="probability-list">
-
-          {chartData.map((item) => (
-
-            <div
-              className="probability-row"
-              key={item.state}
-            >
-
-              <span>
-                |{item.state}⟩
-              </span>
-
-
-              <div className="probability-bar">
-
-                <div
-                  className="probability-fill"
-                  style={{
-                    width: `${item.probability}%`,
-                  }}
-                />
-
-              </div>
-
-
-              <span>
-                {item.probability.toFixed(1)}%
-              </span>
-
+        <NotebookCard label="MEASUREMENTS" title="Observed counts">
+          {counts.length ? (
+            <div className="counts-grid">
+              {counts.map(([state, count]) => (
+                <div className="count-chip" key={state}>
+                  <span>|{state}⟩</span>
+                  <strong>{count}</strong>
+                </div>
+              ))}
             </div>
-
-          ))}
-
-        </div>
-
+          ) : <p className="notebook-muted">No measurement counts were returned.</p>}
+        </NotebookCard>
       </div>
 
-
-      {/* =========================
-          STATEVECTOR
-      ========================= */}
-
-      <div className="result-section">
-
-        <h4>
-          Statevector
-        </h4>
-
-        <pre>
-          {JSON.stringify(
-            result.statevector || [],
-            null,
-            2
-          )}
-        </pre>
-
-      </div>
-
+      <NotebookCard label="STATE PROBABILITIES" title="Probability distribution">
+        {probabilities.length ? (
+          <div className="probability-list">
+            {probabilities.map((item) => (
+              <div className="probability-row" key={item.state}>
+                <span>|{item.state}⟩</span>
+                <div className="probability-bar" aria-label={`${item.state}: ${item.probability.toFixed(1)} percent`}>
+                  <div className="probability-fill" style={{ width: `${Math.min(item.probability, 100)}%` }} />
+                </div>
+                <strong>{item.probability.toFixed(1)}%</strong>
+              </div>
+            ))}
+          </div>
+        ) : <p className="notebook-muted">Probability data was not returned by this engine.</p>}
+      </NotebookCard>
     </div>
   );
 }
-
 
 export default SimulationResults;

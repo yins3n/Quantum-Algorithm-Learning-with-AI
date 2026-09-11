@@ -9,22 +9,26 @@ export function createCircuitJSON(circuit, shots = 1024) {
   const gates = [];
   const seenCnot = new Set();
 
-  circuit.forEach((row, qubit) => row.forEach((gate, column) => {
-    if (!gate) return;
-    const name = gate.toLowerCase();
-    if (name === "cnot") {
-      const key = `${column}:cnot`;
-      if (seenCnot.has(key)) return;
-      const targets = circuit
-        .map((otherRow, index) => otherRow[column]?.toLowerCase() === "cnot" ? index : null)
-        .filter((index) => index !== null);
-      if (targets.length !== 2) return;
-      seenCnot.add(key);
-      gates.push({ name: "cx", qubits: targets, params: [] });
-      return;
-    }
-    gates.push({ name, qubits: [qubit], params: [] });
-  }));
+  // Composer columns represent time steps, so preserve that order for the simulator.
+  for (let column = 0; column < (circuit[0]?.length || 0); column += 1) {
+    circuit.forEach((row, qubit) => {
+      const gate = row[column];
+      if (!gate) return;
+      const name = gate.toLowerCase();
+      if (name === "cnot") {
+        const key = `${column}:cnot`;
+        if (seenCnot.has(key)) return;
+        const qubits = circuit
+          .map((otherRow, index) => otherRow[column]?.toLowerCase() === "cnot" ? index : null)
+          .filter((index) => index !== null);
+        if (qubits.length !== 2) return;
+        seenCnot.add(key);
+        gates.push({ name: "cx", qubits, params: [] });
+        return;
+      }
+      gates.push({ name, qubits: [qubit], params: [] });
+    });
+  }
 
   return { num_qubits: circuit.length, shots, gates };
 }
