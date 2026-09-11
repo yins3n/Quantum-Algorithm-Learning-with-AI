@@ -1,0 +1,59 @@
+.simulation-results {
+  margin-top: 20px;
+  padding: 20px;
+  background: #ffffff;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+}
+
+.simulation-results h3 {
+  margin-bottom: 20px;
+}
+
+.simulation-results.empty {
+  text-align: center;
+  color: #6b7280;
+}
+
+.result-section {
+  margin-top: 20px;
+}
+
+.result-section h4 {
+  margin-bottom: 12px;
+}
+
+.probability-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.probability-row {
+  display: grid;
+  grid-template-columns: 60px 1fr 60px;
+  align-items: center;
+  gap: 10px;
+}
+
+.probability-bar {
+  height: 12px;
+  background: #e5e7eb;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.probability-fill {
+  height: 100%;
+  background: #6366f1;
+  border-radius: 10px;
+}
+
+.result-section pre {
+  padding: 15px;
+  background: #111827;
+  color: #ffffff;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-size: 13px;
+}
