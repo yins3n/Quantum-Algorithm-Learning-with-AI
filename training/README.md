@@ -29,11 +29,29 @@ and writes an adapter to `artifacts/granite-tutor-lora/`. Do not upload model
 weights or adapters to Git unless the team has approved the storage and license
 arrangement.
 
-The included dataset is only a seed set. Before using the adapter with
-learners, expand it with quantum-expert-reviewed examples and compare it
-against `tutor_eval.jsonl`. A successful training run is not evidence of
-factual correctness; the engine must continue grounding every answer in
-verified evaluator and simulator facts.
+The training data is a reviewed starter benchmark. Keep expanding
+`tutor_train.jsonl` with quantum-expert-reviewed examples. `tutor_eval.jsonl`
+is used during training, while `tutor_test.jsonl` is held out for final
+comparison and must not be used for training. A successful training run is
+not evidence of factual correctness; the engine must continue grounding every
+answer in verified evaluator and simulator facts.
+
+## Compare tutor variants
+
+After downloading an adapter from Kaggle, compare the base model, adapter, and
+prompt-tuned Ollama model on the same held-out prompts:
+
+```bash
+python training/evaluate_tutors.py \
+  --adapter /path/to/granite-tutor-lora-v2 \
+  --test training/tutor_test.jsonl \
+  --output training/evaluation-results.json
+```
+
+If Ollama is unavailable, add `--skip-ollama`. To test only the adapter and
+Ollama model, add `--skip-base`. The report measures JSON validity, required
+fields, and a conservative numeric-grounding signal. Have an expert review
+the detailed outputs before selecting a production model.
 
 The Granite 8B adapter requires more memory than a 6 GB RTX 3060 can provide
 for a reliable training step, even with 4-bit loading and gradient
