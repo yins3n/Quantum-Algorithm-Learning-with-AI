@@ -52,12 +52,11 @@ def extract_json(text: str) -> dict[str, Any] | None:
     try:
         value = json.loads(candidate)
     except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", candidate, flags=re.DOTALL)
-        if not match:
-            return None
         try:
-            value = json.loads(match.group(0))
+            value, end = json.JSONDecoder().raw_decode(candidate)
         except json.JSONDecodeError:
+            return None
+        if candidate[end:].strip():
             return None
     return value if isinstance(value, dict) else None
 
@@ -82,6 +81,17 @@ def score_response(response: str, facts: str) -> dict[str, Any]:
         }
     missing = sorted(REQUIRED_FIELDS - parsed.keys())
     unsupported = forbidden_claims(response, facts)
+    schema_errors = []
+    if not isinstance(parsed.get("explanation"), str):
+        schema_errors.append("explanation must be a string")
+    if not isinstance(parsed.get("error_category"), str):
+        schema_errors.append("error_category must be a string")
+    if not isinstance(parsed.get("hint"), str):
+        schema_errors.append("hint must be a string")
+    if parsed.get("suggested_fix") is not None and not isinstance(parsed.get("suggested_fix"), dict):
+        schema_errors.append("suggested_fix must be an object or null")
+    if not isinstance(parsed.get("next_step"), str):
+        schema_errors.append("next_step must be a string")
     explanation = str(parsed.get("explanation", "")).strip().lower()
     hint = str(parsed.get("hint", "")).strip().lower()
     next_step = str(parsed.get("next_step", "")).strip().lower()
@@ -98,10 +108,11 @@ def score_response(response: str, facts: str) -> dict[str, Any]:
         "json_valid": True,
         "required_fields": not missing,
         "missing_fields": missing,
+        "schema_errors": schema_errors,
         "unsupported_numbers": unsupported,
         "repeated_fields": repeated_fields,
         "response": response,
-        "score": format_score + grounding_score,
+        "score": int(not missing and not schema_errors) + grounding_score,
     }
 
 
@@ -132,6 +143,7 @@ def generate_transformers(model_name: str, adapter: str | None, prompts: list[st
                 **inputs,
                 max_new_tokens=max_new_tokens,
                 do_sample=False,
+                repetition_penalty=1.05,
                 pad_token_id=tokenizer.eos_token_id,
             )
         outputs.append(tokenizer.decode(generated[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True))
@@ -163,7 +175,7 @@ def report(name: str, records: list[dict[str, Any]], outputs: list[str]) -> dict
         "model": name,
         "examples": len(results),
         "json_valid_rate": sum(item["json_valid"] for item in results) / len(results),
-        "required_fields_rate": sum(item["required_fields"] for item in results) / len(results),
+        "required_fields_rate": sum(item["required_fields"] and not item.get("schema_errors") for item in results) / len(results),
         "grounded_number_rate": sum(not item["unsupported_numbers"] for item in results) / len(results),
         "non_redundant_rate": sum(not item["repeated_fields"] for item in results) / len(results),
         "mean_score": sum(item["score"] for item in results) / len(results),
@@ -181,7 +193,7 @@ def main() -> None:
     parser.add_argument("--ollama-url", default="http://localhost:11434")
     parser.add_argument("--ollama-model", default="quantum-tutor:latest")
     parser.add_argument("--output", default="training/evaluation-results.json")
-    parser.add_argument("--max-new-tokens", type=int, default=256)
+    parser.add_argument("--max-new-tokens", type=int, default=160)
     parser.add_argument("--skip-base", action="store_true")
     parser.add_argument("--skip-ollama", action="store_true")
     args = parser.parse_args()
