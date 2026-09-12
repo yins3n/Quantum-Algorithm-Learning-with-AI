@@ -104,6 +104,8 @@
       </div>
     </nav>
     <div class="menubar-right">
+      <a class="btn ghost" href="/" title="Back to dashboard">Dashboard</a>
+      <button class="btn ghost" id="ai-tutor-btn" title="Ask the AI tutor">AI Tutor</button>
       <button class="btn ghost" id="page-theme-toggle" title="Toggle light/dark theme">Theme</button>
     </div>
   </header>
@@ -259,8 +261,26 @@
 
   <textarea id="clipboard-buffer" class="hidden" readonly></textarea>
 
+  <!-- AI Tutor panel -->
+  <div class="ai-panel" id="ai-panel">
+    <div class="ai-panel-head">
+      <span class="ai-panel-title">AI Tutor</span>
+      <button class="btn ghost icon-btn" id="ai-panel-close" title="Close tutor">&#10005;</button>
+    </div>
+    <div class="ai-messages" id="ai-messages">
+      <div class="ai-msg ai-msg-ai">
+        <p>Ask me anything about your circuit, or tell me to change it — for example <em>“add an H gate to q0”</em> or <em>“entangle q0 and q1.”</em></p>
+      </div>
+    </div>
+    <div class="ai-compose">
+      <textarea id="ai-input" rows="1" placeholder="Ask the tutor or request a change&hellip;"></textarea>
+      <button class="btn primary" id="ai-send" title="Send (Ctrl+Enter)">Send</button>
+    </div>
+  </div>
+
   <script src="js/sim.js"></script>
   <script src="js/qasm.js"></script>
   <script src="js/app.js"></script>
+  <script src="js/ai.js"></script>
 </body>
 </html>

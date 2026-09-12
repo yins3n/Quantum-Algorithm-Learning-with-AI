@@ -167,8 +167,10 @@ const Qasm = (function () {
     builder.setQubits(totalQubits, qregs.map((r) => r.name));
 
     for (const g of gatesApplied) {
-      // resolve to flat qubit indices
-      const targetIdxs = g.targets.map((t) => qubitIndexOf(t.qreg, t.idx));
+      // resolve to flat qubit indices (measure gates already carry flat indexes)
+      const targetIdxs = g.targets.map((t) =>
+        typeof t === "object" && t !== null ? qubitIndexOf(t.qreg, t.idx) : t
+      );
       const paramObj = {};
       const gp = g.gate;
       if (gp === "cx") {

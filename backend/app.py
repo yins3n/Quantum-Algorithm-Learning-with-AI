@@ -22,7 +22,7 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from backend.rag import KnowledgeChunk, retrieve
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -48,6 +48,16 @@ PARAMETRIC_GATES = {"rx", "ry", "rz", "u", "u1", "u2", "u3", "r", "cp", "crx", "
 GATE_PARAM_COUNTS = {
     "rx": 1, "ry": 1, "rz": 1, "u": 3, "u1": 1, "u2": 2, "u3": 3, "r": 2,
     "cp": 1, "crx": 1, "cry": 1, "crz": 1,
+}
+# Gates the composer UI + parser can faithfully round-trip (OpenQASM 2.0).
+COMPOSER_EDIT_GATES = [
+    "h", "x", "y", "z", "i", "s", "sdg", "t", "tdg", "sx", "sxdg",
+    "rx", "ry", "rz", "u", "u1", "cx", "cz", "ch", "crz", "cp",
+    "swap", "ccx", "measure",
+]
+PARAMETRIC_GATES_WITH_COUNTS = {
+    name: GATE_PARAM_COUNTS[name]
+    for name in ("rx", "ry", "rz", "u", "u1", "crz", "cp")
 }
 MAX_QUBITS = 12
 MAX_GATES = 200
@@ -142,6 +152,12 @@ class ExerciseSubmission(BaseModel):
 class SavedCircuitRequest(BaseModel):
     user_id: str = Field(min_length=1, max_length=128)
     name: str = Field(min_length=1, max_length=120)
+    circuit: Circuit
+
+
+class ComposerAssistRequest(BaseModel):
+    user_id: str = Field(min_length=1, max_length=128)
+    message: str = Field(min_length=1, max_length=6000)
     circuit: Circuit
 
 
@@ -759,6 +775,135 @@ def call_granite(prompt: str, fallback: TutorResponse) -> TutorResponse:
     return fallback
 
 
+def _ollama_json(messages: list[dict[str, str]], options: dict[str, Any]) -> str | None:
+    """Ask Ollama for one JSON object; return the raw content or None."""
+    try:
+        payload = json.dumps({
+            "model": OLLAMA_MODEL,
+            "stream": False,
+            "messages": messages,
+            "format": "json",
+            "options": options,
+        }).encode()
+        request = urllib.request.Request(
+            f"{OLLAMA_URL}/api/chat",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(request, timeout=45) as response:
+            return json.loads(response.read())["message"]["content"]
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, KeyError, ValueError):
+        return None
+
+
+def _parse_composer_edit(raw: str | None) -> tuple[dict[str, Any], str | None] | None:
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    circ = data.get("circuit")
+    if isinstance(circ, dict) and "gates" in circ:
+        explanation = data.get("explanation")
+        if not isinstance(explanation, str):
+            explanation = data.get("summary")
+        return circ, (explanation if isinstance(explanation, str) and explanation.strip() else None)
+    if "gates" in data:
+        explanation = data.get("explanation")
+        return data, (explanation if isinstance(explanation, str) and explanation.strip() else None)
+    return None
+
+
+def _fmt_qasm_num(value: float) -> str:
+    text = format(round(value, 5), "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return "0" if text in ("-0", "0") else text
+
+
+def _qasm_from_canonical_circuit(circuit: Circuit) -> str:
+    """Emit OpenQASM 2.0 that the Composer's own parser can re-import."""
+    gates = circuit.gates
+    lines = ["OPENQASM 2.0;", 'include "qelib1.inc";', "", f"qreg q[{circuit.num_qubits}];"]
+    measure_count = sum(1 for gate in gates if gate.name.lower() == "measure")
+    if measure_count:
+        lines.append(f"creg c[{measure_count}];")
+        lines.append("")
+    measured = 0
+    for gate in gates:
+        name = gate.name.lower()
+        if name != "measure" and name not in COMPOSER_EDIT_GATES:
+            continue
+        qubits = ",".join(f"q[{index}]" for index in gate.qubits)
+        if name == "measure":
+            lines.append(f"measure q[{gate.qubits[0]}] -> c[{measured}];")
+            measured += 1
+            continue
+        if name == "i":
+            lines.append(f"id {qubits};")
+        elif name == "u1":
+            lines.append(f"p({_fmt_qasm_num(gate.params[0] if gate.params else 0)}) {qubits};")
+        elif name == "u":
+            params = ", ".join(_fmt_qasm_num(p) for p in (gate.params + [0, 0, 0])[:3])
+            lines.append(f"u({params}) {qubits};")
+        elif name in {"rx", "ry", "rz", "crz", "cp"}:
+            lines.append(f"{name}({_fmt_qasm_num(gate.params[0] if gate.params else 0)}) {qubits};")
+        else:
+            lines.append(f"{name} {qubits};")
+    return "\n".join(lines)
+
+
+def composer_edit_prompt(circuit: Circuit, message: str) -> str:
+    return (
+        "The learner's current circuit is:\n"
+        + json.dumps(circuit.model_dump(), indent=2)
+        + "\n\nThe learner asks: \"" + message + "\"\n"
+        + 'Return exactly one JSON object with keys "edited", "explanation", and "circuit".\n'
+        + '"circuit" must be the full updated circuit using the SAME schema as above '
+        + '(keys "num_qubits" and "gates"). If the request describes a circuit change, '
+        + 'encode it in "circuit" and set "edited": true. If it is only a question, keep '
+        + 'the circuit completely unchanged and set "edited": false.\n'
+        + 'Set "explanation" to one short, kind sentence explaining what changed (or the '
+        + 'concept, when nothing changed).\n'
+        + "Rules:\n"
+        + "- num_qubits must be an integer between 1 and 12.\n"
+        + "- Allowed gate names (case-sensitive) are: " + ", ".join(COMPOSER_EDIT_GATES) + ".\n"
+        + '- Each gate has "qubits": a list of integer qubit indexes, and for parametric '
+        + 'gates "params": an array of angle values in radians as plain JSON numbers (e.g. 1.5708).\n'
+        + "- Param counts: rx/ry/rz/u1 take 1 param, u takes 3 (theta, phi, lambda), crz/cp take 1.\n"
+        + "- All measure gates must come last, mapping qubit i to classical bit i in sequence.\n"
+        + "- Do not invent extra gates; change only what the request asks for.\n"
+        + "- Output only the JSON object and nothing else; no Markdown."
+    )
+
+
+def _composer_explain(
+    user_id: str,
+    message: str,
+    circuit: Circuit,
+    errors: list[str],
+    simulation: dict[str, Any] | None,
+) -> str:
+    """Fallback explanation when the edit model omits one (uses the tutor pipeline)."""
+    learner = profile(user_id)
+    sources = retrieve(message)
+    fallback = fallback_tutor(errors, simulation, sources, has_circuit=True)
+    answer = call_granite(
+        tutor_context(
+            TutorRequest(user_id=user_id, message=message, circuit=circuit),
+            learner,
+            errors,
+            simulation,
+            sources,
+        ),
+        fallback,
+    )
+    return answer.explanation
+
+
 def tutor_context(request: TutorRequest, learner: dict[str, Any], errors: list[str], simulation: dict[str, Any] | None, sources: list[KnowledgeChunk]) -> str:
     facts = {
         "has_circuit": request.circuit is not None,
@@ -1098,3 +1243,131 @@ def ai_chat(request: AIChatRequest, authorization: str | None = Header(default=N
         authorization,
     )
     return {"message": response["answer"], "context": response["learner_profile"]}
+
+
+@app.post("/composer/assist")
+def composer_assist(
+    request: ComposerAssistRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Embedded tutor for the Composer lab: answers questions and edits circuits.
+
+    The model's proposed edit is trusted only after pydantic validation,
+    circuit validation, and a Qiskit Aer simulation all succeed. Invalid or
+    unchanged proposals never touch the user's circuit.
+    """
+    authenticated_user(request.user_id, authorization)
+    errors = validate_circuit(request.circuit)
+    baseline = simulate(request.circuit) if not errors else None
+
+    edit_options = {
+        "temperature": 0.1,
+        "top_p": 0.8,
+        "top_k": 20,
+        "repeat_penalty": 1.15,
+        "repeat_last_n": 256,
+        "num_predict": 700,
+        "stop": ["<|user|>", "<|system|>"],
+    }
+    system = (
+        "You are a quantum-computing tutor embedded inside a circuit composer. "
+        "You edit a JSON-encoded quantum circuit and explain the change in one "
+        "short sentence. Be precise and helpful; never invent simulator results. "
+        "Return exactly one JSON object and nothing else."
+    )
+    raw = _ollama_json(
+        [
+            {"role": "system", "content": system},
+            {"role": "user", "content": composer_edit_prompt(request.circuit, request.message)},
+        ],
+        edit_options,
+    )
+    parsed = _parse_composer_edit(raw)
+
+    if parsed is None and raw is None:
+        message = "The tutor service is unavailable right now. No changes were applied to your circuit."
+        if errors:
+            message += " " + " ".join(errors)
+        return {
+            "message": message,
+            "edited": False,
+            "applied": False,
+            "reason": "Tutor service unavailable.",
+            "circuit": None,
+            "qasm": None,
+            "simulation": None,
+        }
+
+    if parsed is None:
+        message = _composer_explain(
+            request.user_id, request.message, request.circuit, errors, baseline
+        )
+        return {
+            "message": message,
+            "edited": False,
+            "applied": False,
+            "reason": "The tutor did not return a valid circuit edit; no changes were applied.",
+            "circuit": None,
+            "qasm": None,
+            "simulation": None,
+        }
+
+    candidate_circuit, explanation = parsed
+    applied = False
+    invalid_reason: str | None = None
+    candidate: Circuit | None = None
+    try:
+        candidate = Circuit.model_validate(candidate_circuit)
+    except ValidationError as error:
+        invalid_reason = f"Requested circuit is invalid: {error.errors()[0]['msg'] if error.errors() else 'parse error'}."
+
+    edited = bool(parsed) if candidate is None else candidate.model_dump() != request.circuit.model_dump()
+
+    if candidate is not None:
+        candidate_errors = validate_circuit(candidate)
+        if edited and not candidate_errors:
+            candidate_simulation = simulate(candidate)
+            message = explanation or _composer_explain(
+                request.user_id, request.message, candidate, [], candidate_simulation
+            )
+            record_tutor_interaction(
+                request.user_id,
+                request.message,
+                TutorResponse(
+                    explanation=message,
+                    error_category="none",
+                    hint="",
+                    suggested_fix=None,
+                    next_step="Review the applied change.",
+                    teaching_steps=["Review the applied change."],
+                    sources=[],
+                ),
+            )
+            return {
+                "message": message,
+                "edited": True,
+                "applied": True,
+                "reason": None,
+                "circuit": candidate.model_dump(),
+                "qasm": _qasm_from_canonical_circuit(candidate),
+                "simulation": candidate_simulation,
+            }
+        if edited:
+            invalid_reason = (
+                "; ".join(candidate_errors)
+                if candidate_errors
+                else "The requested circuit matched the current circuit."
+            )
+
+    message = explanation or _composer_explain(
+        request.user_id, request.message, request.circuit, errors or ([invalid_reason] if invalid_reason else []), baseline
+    )
+    return {
+        "message": message,
+        "edited": edited,
+        "applied": False,
+        "reason": invalid_reason,
+        "circuit": None,
+        "qasm": None,
+        "simulation": None,
+    }
