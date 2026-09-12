@@ -1627,7 +1627,6 @@ function init() {
   else afterCircuitChange();
   renderCode();
   setSyncLabel("synced");
-  if (!location.search.includes("qasm")) showTour(0);
 }
 
 document.addEventListener("DOMContentLoaded", init);
