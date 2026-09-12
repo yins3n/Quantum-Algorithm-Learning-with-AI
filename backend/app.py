@@ -20,7 +20,7 @@ from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, ValidationError, field_validator
 from backend.rag import KnowledgeChunk, retrieve
@@ -30,6 +30,7 @@ load_dotenv(ROOT / ".env")
 DB_PATH = Path(os.getenv("QUANTUM_DB", ROOT / "data" / "platform.db"))
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "granite3.2:8b")
+OLLAMA_KEEP_ALIVE = os.getenv("OLLAMA_KEEP_ALIVE", "30m")
 SUPPORTED_GATES = {
     "h", "x", "y", "z", "i", "s", "sdg", "t", "tdg", "sx", "sxdg",
     "rx", "ry", "rz", "u", "u1", "u2", "u3", "r",
@@ -733,6 +734,7 @@ def call_granite(prompt: str, fallback: TutorResponse) -> TutorResponse:
         payload = json.dumps({
             "model": OLLAMA_MODEL,
             "stream": False,
+            "keep_alive": OLLAMA_KEEP_ALIVE,
             "messages": messages,
             "format": "json",
             "options": options,
@@ -781,6 +783,7 @@ def _ollama_json(messages: list[dict[str, str]], options: dict[str, Any]) -> str
         payload = json.dumps({
             "model": OLLAMA_MODEL,
             "stream": False,
+            "keep_alive": OLLAMA_KEEP_ALIVE,
             "messages": messages,
             "format": "json",
             "options": options,
@@ -867,7 +870,7 @@ def composer_edit_prompt(circuit: Circuit, message: str) -> str:
         + 'encode it in "circuit" and set "edited": true. If it is only a question, keep '
         + 'the circuit completely unchanged and set "edited": false.\n'
         + 'Set "explanation" to one short, kind sentence explaining what changed (or the '
-        + 'concept, when nothing changed).\n'
+        + 'concept, when nothing changed). Keep it to at most 20 words.\n'
         + "Rules:\n"
         + "- num_qubits must be an integer between 1 and 12.\n"
         + "- Allowed gate names (case-sensitive) are: " + ", ".join(COMPOSER_EDIT_GATES) + ".\n"
@@ -1246,42 +1249,81 @@ def ai_chat(request: AIChatRequest, authorization: str | None = Header(default=N
 
 
 @app.post("/composer/assist")
-def composer_assist(
-    request: ComposerAssistRequest,
-    authorization: str | None = Header(default=None),
-) -> dict[str, Any]:
-    """Embedded tutor for the Composer lab: answers questions and edits circuits.
-
-    The model's proposed edit is trusted only after pydantic validation,
-    circuit validation, and a Qiskit Aer simulation all succeed. Invalid or
-    unchanged proposals never touch the user's circuit.
-    """
-    authenticated_user(request.user_id, authorization)
-    errors = validate_circuit(request.circuit)
-    baseline = simulate(request.circuit) if not errors else None
-
-    edit_options = {
+def _composer_edit_options() -> dict[str, Any]:
+    return {
         "temperature": 0.1,
         "top_p": 0.8,
         "top_k": 20,
         "repeat_penalty": 1.15,
         "repeat_last_n": 256,
-        "num_predict": 700,
+        "num_predict": 450,
         "stop": ["<|user|>", "<|system|>"],
     }
+
+
+def _composer_edit_messages(request: ComposerAssistRequest) -> list[dict[str, str]]:
     system = (
         "You are a quantum-computing tutor embedded inside a circuit composer. "
         "You edit a JSON-encoded quantum circuit and explain the change in one "
         "short sentence. Be precise and helpful; never invent simulator results. "
         "Return exactly one JSON object and nothing else."
     )
-    raw = _ollama_json(
-        [
-            {"role": "system", "content": system},
-            {"role": "user", "content": composer_edit_prompt(request.circuit, request.message)},
-        ],
-        edit_options,
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": composer_edit_prompt(request.circuit, request.message)},
+    ]
+
+
+class _OllamaStreamError(RuntimeError):
+    """Raised when Ollama's streaming connection cannot be established."""
+
+
+def _stream_ollama_tokens(messages: list[dict[str, str]], options: dict[str, Any]):
+    """Yield message-content deltas from Ollama's streaming /api/chat."""
+    payload = json.dumps({
+        "model": OLLAMA_MODEL,
+        "stream": True,
+        "keep_alive": OLLAMA_KEEP_ALIVE,
+        "messages": messages,
+        "format": "json",
+        "options": options,
+    }).encode()
+    request = urllib.request.Request(
+        f"{OLLAMA_URL}/api/chat",
+        data=payload,
+        headers={"Content-Type": "application/json"},
     )
+    try:
+        response = urllib.request.urlopen(request, timeout=45)
+    except (urllib.error.URLError, TimeoutError, ValueError):
+        raise _OllamaStreamError from None
+    with response:
+        for line in response:
+            chunk = _stream_chunk_content(line)
+            if chunk:
+                yield chunk
+
+
+def _stream_chunk_content(line: bytes) -> str | None:
+    text = line.decode("utf-8", "replace").strip()
+    if not text:
+        return None
+    try:
+        data = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return data.get("message", {}).get("content")
+
+
+def _composer_assist_result(request: ComposerAssistRequest, raw: str | None) -> dict[str, Any]:
+    """Turn the model's raw text into the assist response.
+
+    The proposed edit is trusted only after pydantic validation, circuit
+    validation, and a Qiskit Aer simulation all succeed. Invalid or unchanged
+    proposals never touch the user's circuit.
+    """
+    errors = validate_circuit(request.circuit)
+    baseline = simulate(request.circuit) if not errors else None
     parsed = _parse_composer_edit(raw)
 
     if parsed is None and raw is None:
@@ -1371,3 +1413,43 @@ def composer_assist(
         "qasm": None,
         "simulation": None,
     }
+
+
+def _stream_composer_assist(request: ComposerAssistRequest):
+    """Emit SSE events: one per model delta, then a final result event."""
+    failed = False
+    chunks: list[str] = []
+    try:
+        for chunk in _stream_ollama_tokens(_composer_edit_messages(request), _composer_edit_options()):
+            chunks.append(chunk)
+            yield f"data: {json.dumps({'type': 'delta', 'text': chunk}, ensure_ascii=False)}\n\n"
+    except (_OllamaStreamError, urllib.error.URLError, TimeoutError, ValueError, KeyError):
+        failed = True
+    raw = None if failed or not chunks else "".join(chunks)
+    result = _composer_assist_result(request, raw)
+    yield f"data: {json.dumps({'type': 'result', 'result': result}, ensure_ascii=False)}\n\n"
+
+
+@app.post("/composer/assist")
+def composer_assist(
+    request: ComposerAssistRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Embedded tutor for the Composer lab: answers questions and edits circuits."""
+    authenticated_user(request.user_id, authorization)
+    raw = _ollama_json(_composer_edit_messages(request), _composer_edit_options())
+    return _composer_assist_result(request, raw)
+
+
+@app.post("/composer/assist/stream")
+def composer_assist_stream(
+    request: ComposerAssistRequest,
+    authorization: str | None = Header(default=None),
+) -> StreamingResponse:
+    """Streaming variant: SSE deltas as the model writes, then a result event."""
+    authenticated_user(request.user_id, authorization)
+    return StreamingResponse(
+        _stream_composer_assist(request),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-store"},
+    )

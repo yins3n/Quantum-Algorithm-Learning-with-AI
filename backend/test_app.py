@@ -1,3 +1,4 @@
+import json
 import math
 import os
 import unittest
@@ -229,6 +230,31 @@ class ComposerTutorTests(unittest.TestCase):
         self.assertIn("p(1.5708) q[0];", qasm)
         self.assertIn("u(0.5, 0.25, 0.1) q[0];", qasm)
         self.assertEqual(qasm.count("measure"), 2)
+
+    def test_composer_edit_budget_is_capped(self):
+        self.assertLessEqual(backend._composer_edit_options()["num_predict"], 450)
+
+    def test_assist_stream_emits_delta_then_result_events(self):
+        request = backend.ComposerAssistRequest(
+            user_id="demo-user",
+            message="add an h gate to qubit 0",
+            circuit=backend.Circuit(num_qubits=1, gates=[]),
+        )
+        raw = ('{"edited": true, "explanation": "Added H to qubit 0.", '
+               '"circuit": {"num_qubits": 1, "gates": [{"name": "h", "qubits": [0], "params": []}]}}')
+        mid = len(raw) // 2
+
+        with mock.patch.object(
+            backend, "_stream_ollama_tokens", side_effect=[[raw[:mid], raw[mid:]]]
+        ), mock.patch.object(backend, "record_tutor_interaction"):
+            events = list(backend._stream_composer_assist(request))
+
+        self.assertTrue(all(event.startswith("data: ") for event in events))
+        parsed = [json.loads(event[6:]) for event in events]
+        self.assertEqual([item["type"] for item in parsed], ["delta", "delta", "result"])
+        self.assertEqual("".join(item["text"] for item in parsed[:-1]), raw)
+        self.assertTrue(parsed[-1]["result"]["applied"])
+        self.assertEqual(parsed[-1]["result"]["circuit"]["gates"], [{"name": "h", "qubits": [0], "params": []}])
 
 
 if __name__ == "__main__":

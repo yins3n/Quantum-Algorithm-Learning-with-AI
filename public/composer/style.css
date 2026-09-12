@@ -645,6 +645,13 @@ html, body {
 .ai-msg.ai { align-self: flex-start; background: var(--bg-elev-2); border: 1px solid var(--border); color: var(--text); }
 .ai-msg.pending { opacity: 0.6; font-style: italic; }
 .ai-msg.error { border-color: #d9534f; color: #d9534f; }
+.ai-msg.streaming p::after {
+  content: "\2588";
+  margin-left: 2px;
+  color: var(--accent-hi);
+  animation: ai-blink 1s steps(2, start) infinite;
+}
+@keyframes ai-blink { to { visibility: hidden; } }
 .ai-msg .ai-meta { display: block; margin-top: 6px; font-size: 11px; color: var(--text-faint); }
 
 .ai-compose {

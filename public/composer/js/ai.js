@@ -105,13 +105,115 @@
 
   function sendingStatus() {
     var wrap = document.createElement("div");
-    wrap.className = "ai-msg ai-msg-ai pending";
+    wrap.className = "ai-msg ai-msg-ai streaming";
     var para = document.createElement("p");
-    para.textContent = "Thinking\u2026";
     wrap.appendChild(para);
     messages.appendChild(wrap);
     messages.scrollTop = messages.scrollHeight;
-    return wrap;
+    return { wrap: wrap, para: para, chars: 0 };
+  }
+
+  function streamError(friendly) {
+    var error = new Error(friendly || "The tutor returned an error. No changes were applied.");
+    error.friendly = true;
+    return error;
+  }
+
+  async function streamAssist(payload, pending) {
+    var token = authToken();
+    var headers = { "Content-Type": "application/json" };
+    if (token) headers["Authorization"] = "Bearer " + token;
+
+    var response;
+    try {
+      response = await fetch(ENGINE_BASE + "/composer/assist/stream", {
+        method: "POST",
+        headers: headers,
+        body: JSON.stringify(payload),
+      });
+    } catch {
+      throw streamError("Could not reach the tutor service at " + ENGINE_BASE + ". Is the backend running?");
+    }
+    if (!response.ok) {
+      var detail = "The tutor returned an error (" + response.status + "). No changes were applied.";
+      try {
+        var errorBody = await response.json();
+        if (errorBody && errorBody.detail) detail = String(errorBody.detail);
+      } catch {}
+      throw streamError(detail);
+    }
+    if (!response.body) return null;
+
+    var reader = response.body.getReader();
+    var decoder = new TextDecoder("utf-8");
+    var buffer = "";
+    var result = null;
+    for (;;) {
+      var step;
+      try {
+        step = await reader.read();
+      } catch {
+        break;
+      }
+      buffer += decoder.decode(step.value, { stream: true });
+      var splitAt;
+      while ((splitAt = buffer.indexOf("\n\n")) >= 0) {
+        var block = buffer.slice(0, splitAt);
+        buffer = buffer.slice(splitAt + 2);
+        var dataLine = null;
+        var lines = block.split("\n");
+        for (var i = 0; i < lines.length; i++) {
+          if (lines[i].indexOf("data:") === 0) dataLine = lines[i].slice(5).trim();
+        }
+        if (!dataLine) continue;
+        var event;
+        try {
+          event = JSON.parse(dataLine);
+        } catch {
+          continue;
+        }
+        if (event.type === "delta" && typeof event.text === "string" && event.text.length > 0) {
+          pending.para.textContent += event.text;
+          pending.chars += 1;
+          messages.scrollTop = messages.scrollHeight;
+        } else if (event.type === "result" && event.result) {
+          result = event.result;
+        }
+      }
+      if (step.done) break;
+    }
+    return result;
+  }
+
+  function applyResultToCircuit(pending, result) {
+    pending.wrap.classList.remove("streaming");
+    if (!result) {
+      pending.wrap.remove();
+      appendBubble("The tutor returned an empty response.", "error");
+      return;
+    }
+    if (pending.chars === 0 && result.message) {
+      pending.para.textContent = result.message;
+      pending.chars = 1;
+    }
+    var meta = null;
+    if (result.applied) {
+      try {
+        applyCanonical(result);
+        var gateCount = result.circuit ? result.circuit.gates.length : 0;
+        meta = "Change applied \u2014 the circuit now has " + gateCount + " gate" + (gateCount === 1 ? "" : "s") + ".";
+      } catch (applyError) {
+        meta = "The tutor suggested a change, but the composer could not render it (" + applyError.message + ").";
+      }
+    } else if (result.reason) {
+      meta = String(result.reason);
+    }
+    if (meta) {
+      var tag = document.createElement("span");
+      tag.className = "ai-meta";
+      tag.textContent = meta;
+      pending.wrap.appendChild(tag);
+    }
   }
 
   async function send() {
@@ -128,55 +230,19 @@
       message: text,
       circuit: currentCircuit(),
     };
-    var token = authToken();
-    var headers = { "Content-Type": "application/json" };
-    if (token) headers["Authorization"] = "Bearer " + token;
 
-    var response;
     try {
-      response = await fetch(ENGINE_BASE + "/composer/assist", {
-        method: "POST",
-        headers: headers,
-        body: JSON.stringify(payload),
-      });
-    } catch {
-      pending.remove();
-      appendBubble("Could not reach the tutor service at " + ENGINE_BASE + ". Is the backend running?", "error");
-      sendBtn.disabled = false;
-      return;
-    }
-
-    var data = null;
-    try {
-      data = await response.json();
-    } catch {
-      data = null;
-    }
-    if (!response.ok || !data) {
-      pending.remove();
-      appendBubble(
-        data && data.detail ? String(data.detail) : "The tutor returned an error (" + response.status + "). No changes were applied.",
-        "error",
-      );
-      sendBtn.disabled = false;
-      return;
-    }
-
-    var meta = null;
-    if (data.applied) {
-      try {
-        applyCanonical(data);
-        meta = "Change applied \u2014 the circuit now has " + (data.circuit ? data.circuit.gates.length : 0) + " gate" +
-          ((data.circuit && data.circuit.gates.length === 1) ? "" : "s") + ".";
-      } catch (applyError) {
-        meta = "The tutor suggested a change, but the composer could not render it (" + applyError.message + ").";
+      var result = await streamAssist(payload, pending);
+      if (result && !result.applied && result.message && pending.chars > 1 && result.message !== pending.para.textContent) {
+        pending.para.textContent = result.message;
       }
-    } else if (data.reason) {
-      meta = String(data.reason);
+      applyResultToCircuit(pending, result);
+    } catch (err) {
+      pending.wrap.remove();
+      appendBubble(err && err.friendly ? err.message : "Something went wrong while talking to the tutor. No changes were applied.", "error");
+    } finally {
+      sendBtn.disabled = false;
     }
-    pending.remove();
-    appendBubble(data.message || "No suggestions from the tutor.", "ai", meta);
-    sendBtn.disabled = false;
   }
 
   document.getElementById("ai-tutor-btn").addEventListener("click", function () {
