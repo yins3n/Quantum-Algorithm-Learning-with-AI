@@ -4,7 +4,7 @@ services:
     ports: ["8000:8000"]
     environment:
       QUANTUM_DB: /data/platform.db
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:5173,http://127.0.0.1:5173,http://10.162.17.189:5173}
       USER_ACCESS_MODE: production
       AUTH_REQUIRED: "true"
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET to a random 32+ character secret}
