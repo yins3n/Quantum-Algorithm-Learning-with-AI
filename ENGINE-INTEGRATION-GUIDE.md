@@ -93,22 +93,26 @@ All clients should use this format when sending circuits:
 
 Supported gates currently are:
 
-| Gate | Qubits |
-| --- | --- |
-| `h` | One |
-| `x` | One |
-| `y` | One |
-| `z` | One |
-| `cx` | Two: control, target |
-| `cy` | Two: control, target |
-| `cz` | Two |
-| `swap` | Two |
-| `ch` | Two: control, target |
-| `ccx` | Three: controls, target |
-| `s`, `sdg`, `t`, `tdg` | One |
-| `rx`, `ry`, `rz` | One, with one angle in `params` |
-| `u` | One, with three angles in `params` |
-| `measure` | One |
+| Gate | Qubits | Notes |
+| --- | --- | --- |
+| `h`, `x`, `y`, `z`, `i` | One | `i` is the identity |
+| `s`, `sdg`, `t`, `tdg`, `sx`, `sxdg` | One | Clifford gates |
+| `rx`, `ry`, `rz` | One | One angle in `params` |
+| `u` / `u3`, `u2`, `u1` | One | Three / two / one angles in `params` |
+| `r` | One | Two angles (θ, φ) in `params` |
+| `reset` | One | Reset qubit to \|0⟩ |
+| `barrier` | 1–3 | No-op separator; any count allowed |
+| `cx`, `cy`, `cz`, `ch` | Two | control, target |
+| `swap` | Two | Exchange qubits |
+| `cp`, `crx`, `cry`, `crz` | Two | One angle in `params` |
+| `ecr`, `csx` | Two | Echoed cross-resonance / controlled √X |
+| `ccx` | Three | controls, target (Toffoli) |
+| `cswap` | Three | control, swap targets (Fredkin) |
+| `measure` | One | |
+
+The `POST /integrations/composer` endpoint now exports **OpenQASM 3.0**
+(`format: "openqasm-3.0"`) with `include "stdgates.inc";`, matching the
+circuit code viewer in the local Composer clone.
 
 Qubit indexes are zero-based. The engine validates gate names, qubit ranges,
 gate arity, and invalid CNOT control/target combinations before simulation.

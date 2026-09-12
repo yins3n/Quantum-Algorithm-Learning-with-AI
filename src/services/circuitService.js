@@ -1,9 +1,14 @@
 export const NUMBER_OF_QUBITS = 3;
 export const NUMBER_OF_COLUMNS = 8;
 
-export const TWO_QUBIT_GATES = new Set(["cx", "cy", "cz", "swap", "ch"]);
-export const THREE_QUBIT_GATES = new Set(["ccx"]);
-export const PARAMETRIC_GATES = new Set(["rx", "ry", "rz", "u"]);
+export const TWO_QUBIT_GATES = new Set(["cx", "cy", "cz", "swap", "ch", "cp", "crx", "cry", "crz", "ecr", "csx"]);
+export const THREE_QUBIT_GATES = new Set(["ccx", "cswap"]);
+export const PARAMETRIC_GATES = new Set([
+  "rx", "ry", "rz", "u", "u1", "u2", "u3", "r", "cp", "crx", "cry", "crz",
+]);
+export const GATE_PARAM_COUNTS = {
+  rx: 1, ry: 1, rz: 1, u: 3, u1: 1, u2: 2, u3: 3, r: 2, cp: 1, crx: 1, cry: 1, crz: 1,
+};
 
 export function createEmptyCircuit(
   numQubits = NUMBER_OF_QUBITS,
@@ -80,21 +85,26 @@ export function validateCircuit(circuit) {
 
   const groups = getCircuitGroups(circuit);
   for (const group of groups) {
-    const expectedQubits = group.name === "ccx"
-      ? 3
-      : TWO_QUBIT_GATES.has(group.name)
-        ? 2
-        : 1;
-    const expectedParams = group.name === "u"
-      ? 3
-      : PARAMETRIC_GATES.has(group.name)
-        ? 1
-        : 0;
+    const expectedQubits = group.name === "barrier"
+      ? null
+      : THREE_QUBIT_GATES.has(group.name)
+        ? 3
+        : TWO_QUBIT_GATES.has(group.name)
+          ? 2
+          : 1;
+    const expectedParams = GATE_PARAM_COUNTS[group.name] || 0;
+    const memberCount = group.members.length;
 
-    if (group.members.length !== expectedQubits) {
+    if (expectedQubits !== null && memberCount !== expectedQubits) {
       return {
         valid: false,
         message: `${group.name.toUpperCase()} needs ${expectedQubits} qubit(s). Finish placing the gate or remove it.`,
+      };
+    }
+    if (expectedQubits === null && (memberCount < 1 || memberCount > 3)) {
+      return {
+        valid: false,
+        message: `${group.name.toUpperCase()} spans between 1 and 3 qubits.`,
       };
     }
     if ((group.params || []).length !== expectedParams) {

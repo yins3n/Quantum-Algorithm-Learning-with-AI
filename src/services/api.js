@@ -33,6 +33,7 @@ export const api = {
     body: JSON.stringify(payload),
   }),
   tutor: (payload) => request("/tutor", { method: "POST", body: JSON.stringify(payload) }),
+  aiChat: (payload) => request("/api/ai/chat", { method: "POST", body: JSON.stringify(payload) }),
   user: (id) => request(`/users/${encodeURIComponent(id)}`),
   updatePreferences: (id, preferences) => request(`/users/${encodeURIComponent(id)}/preferences`, {
     method: "PUT",

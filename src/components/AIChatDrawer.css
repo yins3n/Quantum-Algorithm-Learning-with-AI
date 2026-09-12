@@ -1,0 +1,13 @@
+.ai-drawer-trigger { border: 1px solid #33405a; border-radius: 9px; background: #182036; color: #c4cbff; padding: 9px 12px; display: inline-flex; align-items: center; gap: 7px; font-size: 12px; }
+.ai-drawer-trigger:hover { border-color: #7784f3; }
+.ai-drawer { position: fixed; z-index: 20; right: 24px; bottom: 24px; width: min(380px, calc(100vw - 32px)); border: 1px solid #35415e; border-radius: 14px; background: #111827; box-shadow: 0 20px 60px rgba(0, 0, 0, .45); }
+.ai-drawer header { display: flex; justify-content: space-between; align-items: flex-start; padding: 16px 17px; border-bottom: 1px solid #29344c; }
+.ai-drawer header h2 { margin: 5px 0 0; font-size: 16px; }
+.ai-drawer header button { border: 0; background: transparent; color: #9aa6bd; }
+.ai-drawer-messages { display: grid; gap: 9px; max-height: 300px; overflow: auto; padding: 15px; }
+.ai-drawer-message, .ai-drawer-empty { margin: 0; padding: 9px 11px; border-radius: 9px; color: #c4ccdc; background: #182235; font-size: 12px; line-height: 1.55; }
+.ai-drawer-message.user { justify-self: end; color: #dbe0ff; background: #293461; }
+.ai-drawer-empty { color: #8996ad; background: transparent; }
+.ai-drawer form { display: flex; gap: 8px; padding: 12px; border-top: 1px solid #29344c; }
+.ai-drawer input { min-width: 0; flex: 1; border: 1px solid #35415e; border-radius: 8px; padding: 9px; color: #e7ebf5; background: #0c1320; outline: 0; }
+.ai-drawer form button { border: 0; border-radius: 8px; padding: 0 12px; color: white; background: #737fff; }

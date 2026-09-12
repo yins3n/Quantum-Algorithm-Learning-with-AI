@@ -40,7 +40,7 @@ real authentication and authorization integration.
 | `GET /exercises` | List available CodeChef-style exercises |
 | `GET /exercises/{id}` | Load an exercise definition and its public checks |
 | `POST /exercises/{id}/submit` | Evaluate a learner circuit, score it, and record the attempt |
-| `POST /integrations/composer` | Convert the circuit to OpenQASM for live Composer editing |
+| `POST /integrations/composer` | Convert the circuit to OpenQASM 3 for live Composer editing |
 | `POST /integrations/jupyter` | Return a downloadable `.ipynb` notebook |
 
 The shared circuit format is:
@@ -55,19 +55,27 @@ The shared circuit format is:
 }
 ```
 
-Supported gates include single-qubit gates (`h`, `x`, `y`, `z`, `s`, `sdg`,
-`t`, `tdg`, `rx`, `ry`, `rz`, `u`), two-qubit gates (`cx`, `cy`, `cz`, `swap`,
-`ch`), `ccx`, and `measure`. Parametric gates use a `params` array in radians;
-`rx`, `ry`, and `rz` take one value and `u` takes three.
-Explicit measurements are supported only as terminal operations and map qubit
-`i` to classical bit `i`. Circuits without explicit measurements are measured
-automatically at the end; non-terminal or duplicate measurements are rejected.
+Supported gates include single-qubit gates (`h`, `x`, `y`, `z`, `i`, `s`,
+`sdg`, `t`, `tdg`, `sx`, `sxdg`, `rx`, `ry`, `rz`, `u`, `u1`, `u2`, `u3`,
+`r`, `reset`, `barrier`), two-qubit gates (`cx`, `cy`, `cz`, `swap`, `ch`,
+`cp`, `crx`, `cry`, `crz`, `ecr`, `csx`), three-qubit gates (`ccx`,
+`cswap`), and `measure`. Parametric gates use a `params` array in radians;
+`rx`, `ry`, and `rz` take one value, `u`/`u3` take three, `u2` takes two,
+`u1` takes one, `r` takes two, and `cp`, `crx`, `cry`, and `crz` take one.
+The gate palette mirrors the IBM Quantum Composer categories: Operations,
+Pauli, Clifford, Rotation, Two-qubit, and Multi-qubit. Explicit
+measurements are supported only as terminal operations and map qubit
+`i` to classical bit `i`. Circuits without explicit measurements are
+measured automatically at the end; non-terminal or duplicate measurements
+are rejected.
 
 The Circuit Lab palette supports click-to-place and drag-and-drop placement.
 Multi-qubit gates are assembled in one time-step by placing the first qubit and
 then selecting the remaining wire(s); the selected-gate editor changes
-parameters for `rx`, `ry`, `rz`, and `u`. The lab serializes columns in time
-order and sends the resulting circuit directly to `POST /simulate`.
+parameters for `rx`, `ry`, `rz`, `u`/`u1`/`u2`/`u3`, `r`, and `cp`/`crx`/
+`cry`/`crz`. The canvas toggles between the visual grid and an OpenQASM 3 code
+view. The lab serializes columns in time order and sends the resulting circuit
+directly to `POST /simulate`.
 
 The evaluator validates the circuit before simulation. It never treats an LLM
 response as mathematical truth. Qiskit Aer remains the source of simulator

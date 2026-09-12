@@ -21,6 +21,7 @@ import ChallengeDetail from "./pages/ChallengeDetail";
 import Registration from "./pages/Registration";
 import Progress from "./pages/Progress";
 import { getCurrentUserProfile } from "./services/user";
+import AIChatDrawer from "./components/AIChatDrawer";
 import "./App.css";
 
 
@@ -154,7 +155,7 @@ function App() {
           </Routes>
 
         </main>
-
+        <AIChatDrawer />
       </div>
 
     </BrowserRouter>

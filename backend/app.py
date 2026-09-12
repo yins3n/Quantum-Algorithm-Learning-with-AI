@@ -21,21 +21,34 @@ from typing import Any
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, field_validator
+from dotenv import load_dotenv
+from pydantic import AliasChoices, BaseModel, Field, field_validator
 from backend.rag import KnowledgeChunk, retrieve
 
 ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(ROOT / ".env")
 DB_PATH = Path(os.getenv("QUANTUM_DB", ROOT / "data" / "platform.db"))
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "granite3.2:8b")
 SUPPORTED_GATES = {
-    "h", "x", "y", "z", "s", "sdg", "t", "tdg",
-    "rx", "ry", "rz", "u", "cx", "cy", "cz", "swap",
-    "ch", "ccx", "measure",
+    "h", "x", "y", "z", "i", "s", "sdg", "t", "tdg", "sx", "sxdg",
+    "rx", "ry", "rz", "u", "u1", "u2", "u3", "r",
+    "reset", "barrier",
+    "cx", "cy", "cz", "ch", "cp", "crx", "cry", "crz",
+    "swap", "ecr", "csx",
+    "ccx", "cswap", "measure",
 }
-ONE_QUBIT_GATES = {"h", "x", "y", "z", "s", "sdg", "t", "tdg", "rx", "ry", "rz", "u", "measure"}
-TWO_QUBIT_GATES = {"cx", "cy", "cz", "swap", "ch"}
-PARAMETRIC_GATES = {"rx", "ry", "rz", "u"}
+ONE_QUBIT_GATES = {
+    "h", "x", "y", "z", "i", "s", "sdg", "t", "tdg", "sx", "sxdg",
+    "rx", "ry", "rz", "u", "u1", "u2", "u3", "r", "reset", "barrier", "measure",
+}
+TWO_QUBIT_GATES = {"cx", "cy", "cz", "ch", "swap", "cp", "crx", "cry", "crz", "ecr", "csx"}
+THREE_QUBIT_GATES = {"ccx", "cswap"}
+PARAMETRIC_GATES = {"rx", "ry", "rz", "u", "u1", "u2", "u3", "r", "cp", "crx", "cry", "crz"}
+GATE_PARAM_COUNTS = {
+    "rx": 1, "ry": 1, "rz": 1, "u": 3, "u1": 1, "u2": 2, "u3": 3, "r": 2,
+    "cp": 1, "crx": 1, "cry": 1, "crz": 1,
+}
 MAX_QUBITS = 12
 MAX_GATES = 200
 MAX_SHOTS = 10_000
@@ -93,6 +106,12 @@ class TutorRequest(BaseModel):
     circuit: Circuit | None = None
 
 
+class AIChatRequest(BaseModel):
+    user_id: str = Field(min_length=1, max_length=128)
+    message: str = Field(min_length=1, max_length=6000)
+    context: dict[str, Any] = Field(default_factory=dict, max_length=16)
+
+
 class TutorResponse(BaseModel):
     explanation: str
     error_category: str
@@ -107,6 +126,26 @@ class EvaluateRequest(BaseModel):
     user_id: str = Field(min_length=1, max_length=128)
     circuit: Circuit
     expected: dict[str, Any] = Field(default_factory=dict, max_length=8)
+    source: str | None = Field(default=None, max_length=20000)
+
+
+class KernelExecuteRequest(BaseModel):
+    """A safe kernel request: circuits are simulated, source is only inspected."""
+
+    circuit: Circuit | None = None
+    source: str | None = Field(default=None, max_length=20000)
+    code: str | None = Field(default=None, max_length=20000)
+    expected: dict[str, Any] = Field(default_factory=dict, max_length=8)
+
+
+class ChallengeSubmission(BaseModel):
+    exercise_id: str = Field(
+        min_length=1,
+        max_length=128,
+        validation_alias=AliasChoices("exercise_id", "challenge_id"),
+    )
+    user_id: str = Field(min_length=1, max_length=128)
+    circuit: Circuit
     source: str | None = Field(default=None, max_length=20000)
 
 
@@ -484,10 +523,14 @@ def validate_circuit(circuit: Circuit) -> list[str]:
             )
         if name not in SUPPORTED_GATES:
             errors.append(f"Gate {index + 1}: '{gate.name}' is not supported.")
-        expected_qubits = 3 if name == "ccx" else 2 if name in TWO_QUBIT_GATES else 1
-        if len(gate.qubits) != expected_qubits:
-            errors.append(f"Gate {index + 1}: {name.upper()} needs {expected_qubits} qubit(s).")
-        expected_params = 3 if name == "u" else 1 if name in {"rx", "ry", "rz"} else 0
+        if name == "barrier":
+            if not 1 <= len(gate.qubits) <= 3:
+                errors.append(f"Gate {index + 1}: BARRIER needs 1 to 3 qubit(s).")
+        else:
+            expected_qubits = 3 if name in THREE_QUBIT_GATES else 2 if name in TWO_QUBIT_GATES else 1
+            if len(gate.qubits) != expected_qubits:
+                errors.append(f"Gate {index + 1}: {name.upper()} needs {expected_qubits} qubit(s).")
+        expected_params = GATE_PARAM_COUNTS.get(name, 0)
         if len(gate.params) != expected_params:
             errors.append(f"Gate {index + 1}: {name.upper()} needs {expected_params} parameter(s).")
         if any(q < 0 or q >= circuit.num_qubits for q in gate.qubits):
@@ -510,10 +553,25 @@ def build_quantum_circuit(circuit: Circuit, include_measurements: bool):
             if include_measurements:
                 qc.measure(gate.qubits[0], gate.qubits[0])
             continue
-        if name == "ccx":
-            qc.ccx(*gate.qubits)
-        elif name in TWO_QUBIT_GATES:
+        if name == "reset":
+            qc.reset(gate.qubits[0])
+        elif name == "barrier":
+            qc.barrier(*gate.qubits)
+        elif name == "i":
+            qc.id(gate.qubits[0])
+        elif name == "u1":
+            qc.p(gate.params[0], gate.qubits[0])
+        elif name == "u2":
+            qc.u(math.pi / 2, gate.params[0], gate.params[1], gate.qubits[0])
+        elif name == "u3" or name == "u":
+            qc.u(*gate.params, gate.qubits[0])
+        elif name in THREE_QUBIT_GATES:
             getattr(qc, name)(*gate.qubits)
+        elif name in TWO_QUBIT_GATES:
+            if name in PARAMETRIC_GATES:
+                getattr(qc, name)(*gate.params, *gate.qubits)
+            else:
+                getattr(qc, name)(*gate.qubits)
         elif name in PARAMETRIC_GATES:
             getattr(qc, name)(*gate.params, gate.qubits[0])
         else:
@@ -559,11 +617,19 @@ def simulate(circuit: Circuit) -> dict[str, Any]:
         }
 
 
-def fallback_tutor(errors: list[str], simulation: dict[str, Any] | None, sources: list[KnowledgeChunk]) -> TutorResponse:
+def fallback_tutor(errors: list[str], simulation: dict[str, Any] | None, sources: list[KnowledgeChunk], has_circuit: bool = False) -> TutorResponse:
+    next_step = "Make one small change and run the circuit again."
+    teaching_steps = ["Validate the circuit.", "Use only simulator-confirmed results.", "Apply one correction and retry."]
     if errors:
         explanation = errors[0]
         category = "circuit_validation"
         hint = "Read the gate-level error, then correct one issue before submitting again."
+    elif not has_circuit:
+        explanation = "You asked a conceptual question without a circuit. I can explain concepts from the trusted knowledge base and suggest a small circuit so you can see the idea in action."
+        category = "concept"
+        hint = "Ask about a specific gate or concept, or attach a small circuit to see a concrete example."
+        next_step = "Ask a concept question or attach a circuit to explore it hands-on."
+        teaching_steps = ["Pick one concept to explore.", "Ask a focused question or build a small circuit.", "Run it and connect the measurement to the theory."]
     elif simulation and simulation.get("probabilities") is not None:
         explanation = "The circuit was validated and its simulator results are available below."
         category = "none"
@@ -576,10 +642,82 @@ def fallback_tutor(errors: list[str], simulation: dict[str, Any] | None, sources
         explanation=explanation,
         error_category=category,
         hint=hint,
-        next_step="Make one small change and run the circuit again.",
-        teaching_steps=["Validate the circuit.", "Use only simulator-confirmed results.", "Apply one correction and retry."],
+        next_step=next_step,
+        teaching_steps=teaching_steps,
         sources=[chunk.title for chunk in sources],
     )
+
+
+def _parse_json_lenient(raw: str) -> dict[str, Any] | None:
+    """Parse an LLM reply, recovering from truncated JSON by cutting back to
+    the last structural boundary outside a string literal."""
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else None
+    except json.JSONDecodeError:
+        pass
+    in_string = False
+    escaped = False
+    boundaries = []
+    for index, char in enumerate(raw):
+        if char == "\\" and in_string and not escaped:
+            escaped = True
+            continue
+        if char == '"' and not escaped:
+            in_string = not in_string
+            escaped = False
+            continue
+        escaped = False
+        if not in_string and char in ":,[]{}":
+            boundaries.append(index)
+    for index in reversed(boundaries):
+        if not raw[: index + 1].lstrip().startswith("{"):
+            continue
+        for end in (index, index + 1):
+            prefix = raw[:end]
+            for closer in ("", "}", "]}"):
+                candidate = prefix + closer
+                try:
+                    data = json.loads(candidate)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(data, dict):
+                    return data
+    return None
+
+
+def _validated_response(raw: str | None, fallback: TutorResponse) -> TutorResponse | None:
+    """Validate a raw LLM reply, repairing minor deviations (null fields,
+    wrong types, truncation) instead of discarding the whole answer."""
+    if not raw:
+        return None
+    try:
+        return TutorResponse.model_validate_json(raw)
+    except (json.JSONDecodeError, ValueError):
+        pass
+    data = _parse_json_lenient(raw)
+    if data is None:
+        return None
+    data["explanation"] = data["explanation"] if isinstance(data.get("explanation"), str) and data["explanation"].strip() else fallback.explanation
+    data["hint"] = data["hint"] if isinstance(data.get("hint"), str) and data["hint"].strip() else fallback.hint
+    data["next_step"] = data["next_step"] if isinstance(data.get("next_step"), str) and data["next_step"].strip() else fallback.next_step
+    category = data.get("error_category")
+    data["error_category"] = category if isinstance(category, str) and category.strip() else fallback.error_category
+    data["suggested_fix"] = data["suggested_fix"] if isinstance(data.get("suggested_fix"), dict) else None
+    steps = data.get("teaching_steps")
+    data["teaching_steps"] = [step for step in steps if isinstance(step, str) and step.strip()] if isinstance(steps, list) else []
+    if not data["teaching_steps"]:
+        data["teaching_steps"] = [step for step in fallback.teaching_steps]
+    sources = data.get("sources")
+    data["sources"] = [source for source in sources if isinstance(source, str) and source.strip()] if isinstance(sources, list) else []
+    if not data["sources"]:
+        data["sources"] = [source for source in fallback.sources]
+    try:
+        return TutorResponse.model_validate(data)
+    except ValueError:
+        return None
 
 
 def call_granite(prompt: str, fallback: TutorResponse) -> TutorResponse:
@@ -587,7 +725,11 @@ def call_granite(prompt: str, fallback: TutorResponse) -> TutorResponse:
         "You are a patient quantum-computing tutor. Treat the JSON inside "
         "<verified_engine_facts> as authoritative and use trusted knowledge "
         "only for general explanations. Never invent simulator results, "
-        "scores, gates, or citations. Return exactly one JSON object and "
+        "scores, gates, or citations. If has_circuit is false, no simulator "
+        "was run and none is missing: answer the conceptual question using "
+        "<trusted_knowledge> and never report simulator_unavailable in that "
+        "case. If has_circuit is true, rely only on the simulation facts "
+        "provided. Return exactly one JSON object and "
         "nothing else. Required fields are explanation, error_category, hint, "
         "suggested_fix, next_step, teaching_steps, and sources. "
         "suggested_fix must be an object or null. teaching_steps must contain "
@@ -600,7 +742,7 @@ def call_granite(prompt: str, fallback: TutorResponse) -> TutorResponse:
         "top_k": 20,
         "repeat_penalty": 1.15,
         "repeat_last_n": 256,
-        "num_predict": 300,
+        "num_predict": 900,
         "stop": ["<|user|>", "<|system|>"],
     }
 
@@ -624,25 +766,35 @@ def call_granite(prompt: str, fallback: TutorResponse) -> TutorResponse:
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": prompt},
     ]
+    raw = None
     try:
         raw = request_response(messages)
-        return TutorResponse.model_validate_json(raw)
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, KeyError, ValueError):
-        retry_prompt = (
-            "Your previous response was invalid. Return exactly one JSON "
-            "object and nothing else. Do not use Markdown or a second object. "
-            "Use the required fields and make suggested_fix an object or null. "
-            "Use only the facts inside <verified_engine_facts>.\n\n" + prompt
-        )
-        try:
-            raw = request_response([messages[0], {"role": "user", "content": retry_prompt}])
-            return TutorResponse.model_validate_json(raw)
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, KeyError, ValueError):
-            return fallback
+        raw = None
+    answer = _validated_response(raw, fallback)
+    if answer is not None:
+        return answer
+    retry_prompt = (
+        "Your previous response was invalid. Return exactly one JSON "
+        "object and nothing else. Do not use Markdown or a second object. "
+        "Use the required fields, make error_category a non-empty string, "
+        "and make suggested_fix an object or null. "
+        "Use only the facts inside <verified_engine_facts>.\n\n" + prompt
+    )
+    raw = None
+    try:
+        raw = request_response([messages[0], {"role": "user", "content": retry_prompt}])
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, KeyError, ValueError):
+        raw = None
+    answer = _validated_response(raw, fallback)
+    if answer is not None:
+        return answer
+    return fallback
 
 
 def tutor_context(request: TutorRequest, learner: dict[str, Any], errors: list[str], simulation: dict[str, Any] | None, sources: list[KnowledgeChunk]) -> str:
     facts = {
+        "has_circuit": request.circuit is not None,
         "validation_errors": errors,
         "simulation": simulation,
         "evaluator_passed": (
@@ -669,18 +821,36 @@ def tutor_context(request: TutorRequest, learner: dict[str, Any], errors: list[s
 
 
 def qasm(circuit: Circuit) -> str:
-    lines = ["OPENQASM 2.0;", 'include "qelib1.inc";', f"qreg q[{circuit.num_qubits}];", f"creg c[{circuit.num_qubits}];"]
+    lines = ["OPENQASM 3.0;", 'include "stdgates.inc";']
+    names = {gate.name.lower() for gate in circuit.gates}
+    if "sxdg" in names:
+        lines.append("gate sxdg q { s q; h q; s q; }")
+    if "ecr" in names:
+        lines.append("gate ecr q0, q1 { s q0; sx q1; cx q0, q1; x q0; }")
+    lines.append(f"bit[{circuit.num_qubits}] c;")
+    lines.append(f"qubit[{circuit.num_qubits}] q;")
     for gate in circuit.gates:
         name = gate.name.lower()
+        qubits = ",".join(f"q[{index}]" for index in gate.qubits)
         if name == "measure":
-            lines.append(f"measure q[{gate.qubits[0]}] -> c[{gate.qubits[0]}];")
-        elif name == "ccx":
-            lines.append(f"ccx q[{gate.qubits[0]}],q[{gate.qubits[1]}],q[{gate.qubits[2]}];")
-        elif name in TWO_QUBIT_GATES:
-            lines.append(f"{name} q[{gate.qubits[0]}],q[{gate.qubits[1]}];")
+            lines.append(f"c[{gate.qubits[0]}] = measure q[{gate.qubits[0]}];")
+        elif name == "reset":
+            lines.append(f"reset q[{gate.qubits[0]}];")
+        elif name == "barrier":
+            lines.append(f"barrier {qubits};")
+        elif name == "i":
+            lines.append(f"id q[{gate.qubits[0]}];")
+        elif name == "u1":
+            lines.append(f"p({gate.params[0]}) q[{gate.qubits[0]}];")
+        elif name == "u2":
+            lines.append(f"U(pi/2, {gate.params[0]}, {gate.params[1]}) q[{gate.qubits[0]}];")
+        elif name in {"u", "u3"}:
+            lines.append(f"U({','.join(map(str, gate.params))}) q[{gate.qubits[0]}];")
+        elif name == "r":
+            lines.append(f"U({gate.params[0]}, -pi/2 + {gate.params[1]}, pi/2 - {gate.params[1]}) q[{gate.qubits[0]}];")
         else:
             params = f"({','.join(map(str, gate.params))})" if gate.params else ""
-            lines.append(f"{name}{params} q[{gate.qubits[0]}];")
+            lines.append(f"{name}{params} {qubits};")
     return "\n".join(lines)
 
 
@@ -802,6 +972,41 @@ def submit_exercise(exercise: Exercise, request: ExerciseSubmission) -> dict[str
     }
 
 
+def execute_kernel(request: KernelExecuteRequest) -> dict[str, Any]:
+    """Validate and simulate the supported circuit DSL without running Python."""
+    source = request.source if request.source is not None else request.code
+    source_errors = safe_python_check(source) if source else []
+    circuit_errors = validate_circuit(request.circuit) if request.circuit else []
+    errors = [*source_errors, *circuit_errors]
+    simulation = simulate(request.circuit) if request.circuit and not errors else None
+
+    check_errors = validate_check_config(request.expected) if request.expected else []
+    malformed_checks = [
+        error for error in check_errors
+        if error != "at least one expected check is required."
+    ]
+    if malformed_checks:
+        raise HTTPException(status_code=422, detail=malformed_checks)
+    checks = (
+        evaluate_checks(request.circuit, simulation, request.expected)
+        if request.circuit and simulation and simulation.get("probabilities") is not None and not errors
+        else []
+    )
+    return {
+        "executed": bool(
+            request.circuit
+            and not errors
+            and simulation
+            and simulation.get("probabilities") is not None
+        ),
+        "validated_errors": errors,
+        "source_checked": source is not None,
+        "simulation": simulation,
+        "checks": checks,
+        "passed": bool(checks) and all(check["passed"] for check in checks),
+    }
+
+
 def dependency_status() -> dict[str, str]:
     status = {"database": "unavailable", "simulator": "unavailable", "rag": "available"}
     connection = None
@@ -908,6 +1113,25 @@ def submit(
     return submit_exercise(exercise, request)
 
 
+@app.post("/api/challenges/submit")
+def submit_challenge(
+    request: ChallengeSubmission,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    exercise = EXERCISES.get(request.exercise_id)
+    if exercise is None:
+        raise HTTPException(status_code=404, detail="Exercise not found.")
+    authenticated_user(request.user_id, authorization)
+    return submit_exercise(
+        exercise,
+        ExerciseSubmission(
+            user_id=request.user_id,
+            circuit=request.circuit,
+            source=request.source,
+        ),
+    )
+
+
 @app.get("/users/{user_id}")
 def get_user(user_id: str, authorization: str | None = Header(default=None)) -> dict[str, Any]:
     authenticated_user(user_id, authorization)
@@ -1005,7 +1229,7 @@ def tutor(request: TutorRequest, authorization: str | None = Header(default=None
     errors = validate_circuit(request.circuit) if request.circuit else []
     simulation = simulate(request.circuit) if request.circuit and not errors else None
     sources = retrieve(f"{request.message} {' '.join(errors)}")
-    fallback = fallback_tutor(errors, simulation, sources)
+    fallback = fallback_tutor(errors, simulation, sources, has_circuit=request.circuit is not None)
     answer = call_granite(tutor_context(request, learner, errors, simulation, sources), fallback)
     record_tutor_interaction(request.user_id, request.message, answer)
     return {
@@ -1015,6 +1239,18 @@ def tutor(request: TutorRequest, authorization: str | None = Header(default=None
         "retrieved_sources": [chunk.title for chunk in sources],
         "learner_profile": learner,
     }
+
+
+@app.post("/api/ai/chat")
+def ai_chat(request: AIChatRequest, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    """Global AI entry point, grounded by the same validated tutor pipeline."""
+    circuit_payload = request.context.get("circuit")
+    circuit = Circuit.model_validate(circuit_payload) if circuit_payload else None
+    response = tutor(
+        TutorRequest(user_id=request.user_id, message=request.message, circuit=circuit),
+        authorization,
+    )
+    return {"message": response["answer"], "context": response["learner_profile"]}
 
 
 @app.post("/evaluate")
@@ -1058,6 +1294,7 @@ def evaluate(request: EvaluateRequest, authorization: str | None = Header(defaul
 
 
 @app.post("/simulate")
+@app.post("/api/quantum/simulate")
 def run_simulation(circuit: Circuit) -> dict[str, Any]:
     errors = validate_circuit(circuit)
     if errors:
@@ -1068,12 +1305,17 @@ def run_simulation(circuit: Circuit) -> dict[str, Any]:
     return result
 
 
+@app.post("/api/kernel/execute")
+def kernel_execute(request: KernelExecuteRequest) -> dict[str, Any]:
+    return execute_kernel(request)
+
+
 @app.post("/integrations/composer")
 def composer(circuit: Circuit) -> dict[str, Any]:
     errors = validate_circuit(circuit)
     if errors:
         raise HTTPException(status_code=422, detail=errors)
-    return {"qasm": qasm(circuit), "format": "openqasm-2.0", "composer": "Paste the QASM into IBM Quantum Composer to continue editing live."}
+    return {"qasm": qasm(circuit), "format": "openqasm-3.0", "composer": "Paste the QASM into IBM Quantum Composer to continue editing live."}
 
 
 @app.post("/integrations/transpile")

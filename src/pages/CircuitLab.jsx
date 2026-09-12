@@ -2,6 +2,10 @@ import { useMemo, useState } from "react";
 import SimulationResults from "../components/circuit/SimulationResults";
 import ProbabilityChart from "../components/circuit/ProbabilityChart";
 import BlochSphere from "../components/circuit/BlochSphere";
+import QuantumCanvas from "../components/composer/QuantumCanvas";
+import QiskitConverter from "../components/composer/QiskitConverter";
+import ComposerAssistant from "../components/composer/ComposerAssistant";
+import { circuitToQasm3 } from "../components/composer/qiskitUtils";
 import { api } from "../services/api";
 import { getCurrentUserId } from "../services/user";
 import {
@@ -17,29 +21,89 @@ import {
 import { Atom, Code2, Play, Plus, RotateCcw, Trash2, WandSparkles } from "lucide-react";
 import "./CircuitLab.css";
 
-const GATES = [
-  ["h", "Hadamard", "Superposition"],
-  ["x", "Pauli-X", "Quantum NOT"],
-  ["y", "Pauli-Y", "Bit and phase flip"],
-  ["z", "Pauli-Z", "Phase flip"],
-  ["s", "S", "Quarter-turn phase"],
-  ["sdg", "S†", "Inverse S phase"],
-  ["t", "T", "Eighth-turn phase"],
-  ["tdg", "T†", "Inverse T phase"],
-  ["rx", "RX", "X-axis rotation"],
-  ["ry", "RY", "Y-axis rotation"],
-  ["rz", "RZ", "Z-axis rotation"],
-  ["u", "U", "General single-qubit gate"],
-  ["cx", "CX", "Controlled-X"],
-  ["cy", "CY", "Controlled-Y"],
-  ["cz", "CZ", "Controlled-Z"],
-  ["swap", "SWAP", "Exchange two qubits"],
-  ["ch", "CH", "Controlled-H"],
-  ["ccx", "CCX", "Toffoli (3 qubits)"],
-  ["measure", "M", "Measure qubit"],
-].map(([name, label, description]) => ({ name, label, description }));
+const MAX_QUBITS = 12;
+
+const GATE_GROUPS = [
+  {
+    label: "Operations",
+    gates: [
+      ["measure", "M", "Measure qubit to a classical bit"],
+      ["reset", "Reset", "Reset qubit to |0⟩"],
+      ["barrier", "Barrier", "Prevent operations merging across it"],
+    ],
+  },
+  {
+    label: "Pauli",
+    gates: [
+      ["i", "I", "Identity (do nothing)"],
+      ["x", "X", "Quantum NOT"],
+      ["y", "Y", "Bit and phase flip"],
+      ["z", "Z", "Phase flip"],
+    ],
+  },
+  {
+    label: "Clifford",
+    gates: [
+      ["h", "H", "Hadamard, superposition"],
+      ["s", "S", "Quarter-turn phase"],
+      ["sdg", "S†", "Inverse S phase"],
+      ["t", "T", "Eighth-turn phase"],
+      ["tdg", "T†", "Inverse T phase"],
+      ["sx", "Sx", "√X root-of-NOT"],
+      ["sxdg", "Sx†", "Inverse √X"],
+    ],
+  },
+  {
+    label: "Rotation",
+    gates: [
+      ["rx", "RX", "X-axis rotation"],
+      ["ry", "RY", "Y-axis rotation"],
+      ["rz", "RZ", "Z-axis rotation"],
+      ["u1", "U1", "Diagonal U(λ)"],
+      ["u2", "U2", "U(π/2, φ, λ)"],
+      ["u3", "U3", "General U(θ, φ, λ)"],
+      ["r", "R", "General R(θ, φ) rotation"],
+    ],
+  },
+  {
+    label: "Two-qubit",
+    gates: [
+      ["cx", "CX", "Controlled-X"],
+      ["cy", "CY", "Controlled-Y"],
+      ["cz", "CZ", "Controlled-Z"],
+      ["ch", "CH", "Controlled-H"],
+      ["cp", "CP", "Controlled phase"],
+      ["crx", "CRX", "Controlled-RX"],
+      ["cry", "CRY", "Controlled-RY"],
+      ["crz", "CRZ", "Controlled-RZ"],
+      ["swap", "SWAP", "Exchange two qubits"],
+      ["ecr", "ECR", "Echoed cross-resonance"],
+      ["csx", "CSX", "Controlled √X"],
+    ],
+  },
+  {
+    label: "Multi-qubit",
+    gates: [
+      ["ccx", "CCX", "Toffoli (3 qubits)"],
+      ["cswap", "CSWAP", "Fredkin, controlled SWAP"],
+    ],
+  },
+].map((group) => ({
+  ...group,
+  gates: group.gates.map(([name, label, description]) => ({ name, label, description })),
+}));
 
 const MULTI_QUBIT_GATES = new Set([...TWO_QUBIT_GATES, ...THREE_QUBIT_GATES]);
+
+const GATE_SYMBOLS = {
+  h: "H", x: "X", y: "Y", z: "Z", i: "I", s: "S", sdg: "S†", t: "T", tdg: "T†",
+  sx: "Sx", sxdg: "Sx†", rx: "RX", ry: "RY", rz: "RZ", u: "U", u1: "U1", u2: "U2", u3: "U3", r: "R",
+  measure: "M", reset: "Reset", barrier: "—",
+};
+const GATE_PARAM_LABELS = {
+  u: ["θ", "φ", "λ"], u3: ["θ", "φ", "λ"], u2: ["φ", "λ"], u1: ["λ"], r: ["θ", "φ"],
+};
+
 let nextGateId = 0;
 
 function createGateId(name, column, qubit) {
@@ -48,13 +112,40 @@ function createGateId(name, column, qubit) {
 }
 
 function defaultParams(name) {
-  if (name === "u") return [0, 0, 0];
+  if (name === "u" || name === "u3") return [0, 0, 0];
+  if (name === "u2") return [0, 0];
+  if (name === "u1") return [0];
+  if (name === "r") return [0, 0];
   if (PARAMETRIC_GATES.has(name)) return [0];
   return [];
 }
 
 function makeCell(name, id, order, role, params = defaultParams(name), pending = false) {
   return { id, name, order, role, params, pending };
+}
+
+function circuitFromOperations(payload) {
+  const circuit = createEmptyCircuit(payload.num_qubits);
+  (payload.gates || []).forEach((gate, column) => {
+    if (column >= NUMBER_OF_COLUMNS) throw new Error(`Qiskit import supports up to ${NUMBER_OF_COLUMNS} steps.`);
+    const name = gate.name.toLowerCase();
+    const qubits = gate.qubits || [];
+    const roles = name === "swap"
+      ? ["swap-a", "swap-b"]
+      : name === "cswap"
+        ? ["control", "swap-a", "swap-b"]
+        : qubits.length === 3
+          ? ["control", "control", "target"]
+          : qubits.length === 2
+            ? ["control", "target"]
+            : ["single"];
+    const id = createGateId(name, column, qubits[0] || 0);
+    qubits.forEach((qubit, order) => {
+      if (!Number.isInteger(qubit) || qubit < 0 || qubit >= circuit.length) throw new Error(`Invalid qubit q${qubit} in Qiskit code.`);
+      circuit[qubit][column] = makeCell(name, id, order, roles[order], gate.params || []);
+    });
+  });
+  return circuit;
 }
 
 function gateSize(name) {
@@ -72,6 +163,10 @@ function updateGroup(circuit, id, update) {
   }));
 }
 
+function paramLabels(name) {
+  return GATE_PARAM_LABELS[name] || ["angle"];
+}
+
 function CircuitLab() {
   const [circuit, setCircuit] = useState(createEmptyCircuit());
   const [selectedGate, setSelectedGate] = useState(null);
@@ -81,13 +176,13 @@ function CircuitLab() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [transpiled, setTranspiled] = useState(null);
+  const [view, setView] = useState("circuit");
 
   const groups = useMemo(() => getCircuitGroups(circuit), [circuit]);
   const selectedGroup = selectedCell
     ? groups.find((group) => group.id === selectedCell.id)
     : null;
-  const gateCount = groups.length;
-  const connectors = groups.filter((group) => group.members.length > 1);
+  const openQasm = useMemo(() => circuitToQasm3(createCircuitJSON(circuit)), [circuit]);
 
   const selectGate = (name) => {
     if (pendingPlacement) return;
@@ -162,12 +257,15 @@ function CircuitLab() {
 
     const orderedRoles = name === "swap"
       ? ["swap-a", "swap-b"]
-      : size === 3
-        ? ["control", "control", "target"]
-        : pendingPlacement.firstRole === "target"
-          ? ["target", "control"]
-          : ["control", "target"];
+      : name === "cswap"
+        ? ["control", "swap-a", "swap-b"]
+        : size === 3
+          ? ["control", "control", "target"]
+          : pendingPlacement.firstRole === "target"
+            ? ["target", "control"]
+            : ["control", "target"];
     const orderedOrders = name !== "swap"
+      && name !== "cswap"
       && size === 2
       && pendingPlacement.firstRole === "target"
       ? [1, 0]
@@ -241,6 +339,26 @@ function CircuitLab() {
     setError("");
   };
 
+  const addQubit = () => {
+    if (circuit.length >= MAX_QUBITS) return;
+    const columns = circuit[0].length;
+    setCircuit((current) => [...current, Array(columns).fill(null)]);
+    setSimulationResult(null);
+    setTranspiled(null);
+    setError("");
+  };
+
+  const removeQubit = () => {
+    if (circuit.length <= 1) return;
+    setSelectedGate(null);
+    setSelectedCell(null);
+    setPendingPlacement(null);
+    setSimulationResult(null);
+    setTranspiled(null);
+    setError("");
+    setCircuit((current) => current.slice(0, -1));
+  };
+
   const updateSelectedParams = (index, value) => {
     if (!selectedGroup) return;
     const params = [...selectedGroup.params];
@@ -301,15 +419,33 @@ function CircuitLab() {
     }
   };
 
+  const importQiskit = (payload) => {
+    try {
+      setCircuit(circuitFromOperations(payload));
+      setSelectedCell(null);
+      setSelectedGate(null);
+      setPendingPlacement(null);
+      setSimulationResult(null);
+      setTranspiled(null);
+      setError("");
+    } catch (importError) {
+      setError(importError.message);
+    }
+  };
+
   const renderGate = (cell) => {
     if (!cell) return null;
     const name = cellGateName(cell);
     if (name === "measure") return "M";
-    if (!MULTI_QUBIT_GATES.has(name) && name !== "ccx") {
-      return name.toUpperCase().replace("SDG", "S†").replace("TDG", "T†");
+    if (name === "reset") return "Reset";
+    if (name === "barrier") return "—";
+    if (MULTI_QUBIT_GATES.has(name)) {
+      if (typeof cell === "string") return "●";
+      if (cell.role === "target") return "⊕";
+      if (cell.role?.includes("swap")) return "×";
+      return "●";
     }
-    if (name === "swap") return "×";
-    return cell.role === "target" ? "⊕" : "●";
+    return GATE_SYMBOLS[name] || name.toUpperCase().replace("SDG", "S†").replace("TDG", "T†");
   };
 
   return (
@@ -347,26 +483,31 @@ function CircuitLab() {
             <h2>Gate library</h2>
             <p>Drag an instruction onto a wire. Click to select.</p>
           </div>
-          <div className="gate-list">
-            {GATES.map((gate) => (
-              <button
-                key={gate.name}
-                type="button"
-                className={`gate-item ${selectedGate === gate.name ? "selected-gate-item" : ""}`}
-                draggable
-                onDragStart={(event) => event.dataTransfer.setData("text/plain", gate.name)}
-                onClick={() => selectGate(gate.name)}
-                aria-pressed={selectedGate === gate.name}
-              >
-                <div className="gate-symbol">{gate.label}</div>
-                <div className="gate-info">
-                  <strong>{gate.label}</strong>
-                  <span>{gate.description}</span>
-                </div>
-                <Plus size={15} />
-              </button>
-            ))}
-          </div>
+          {GATE_GROUPS.map((group) => (
+            <div className="gate-group" key={group.label}>
+              <div className="gate-group-heading">{group.label}</div>
+              <div className="gate-list">
+                {group.gates.map((gate) => (
+                  <button
+                    key={gate.name}
+                    type="button"
+                    className={`gate-item ${selectedGate === gate.name ? "selected-gate-item" : ""}`}
+                    draggable
+                    onDragStart={(event) => event.dataTransfer.setData("text/plain", gate.name)}
+                    onClick={() => selectGate(gate.name)}
+                    aria-pressed={selectedGate === gate.name}
+                  >
+                    <div className="gate-symbol">{gate.label}</div>
+                    <div className="gate-info">
+                      <strong>{gate.label}</strong>
+                      <span>{gate.description}</span>
+                    </div>
+                    <Plus size={15} />
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
 
           {selectedGate && (
             <div className="selected-gate">
@@ -414,7 +555,7 @@ function CircuitLab() {
                 <div className="parameter-fields">
                   {selectedGroup.params.map((param, index) => (
                     <label key={`${selectedGroup.id}-${index}`}>
-                      {selectedGroup.name === "u" ? ["θ", "φ", "λ"][index] : "angle"}
+                      {paramLabels(selectedGroup.name)[index]}
                       <input
                         type="number"
                         step="0.1"
@@ -437,80 +578,27 @@ function CircuitLab() {
           </div>
         </aside>
 
-        <div className="circuit-canvas">
-          <div className="canvas-topbar">
-            <div><span className="canvas-tab">Circuit</span><span className="canvas-tab muted">QASM</span><small>{circuit.length} qubits · {NUMBER_OF_COLUMNS} steps</small></div>
-            <div className="circuit-stats"><span>Qubits:<strong>{circuit.length}</strong></span><span>Gates:<strong>{gateCount}</strong></span></div>
-          </div>
-
-          <div className="quantum-circuit">
-            <div className="column-header">
-              <div className="qubit-header">Qubit / step</div>
-              {Array.from({ length: NUMBER_OF_COLUMNS }, (_, column) => <div key={column} className="column-number">{column + 1}</div>)}
-            </div>
-
-            {circuit.map((row, qubit) => (
-              <div className="qubit-row" key={qubit}>
-                <div className="qubit-label">q<sub>{qubit}</sub></div>
-                <div className="wire-area">
-                  <div className="quantum-wire" />
-                  <div className="circuit-cells">
-                    {row.map((cell, column) => {
-                      const selected = selectedCell?.id && typeof cell !== "string" && selectedCell.id === cell?.id;
-                      return (
-                        <div
-                          key={column}
-                          data-qubit={qubit}
-                          data-column={column}
-                          className={`circuit-cell ${selected ? "selected-cell" : ""}`}
-                          onClick={() => handleCellClick(qubit, column)}
-                          onDragOver={(event) => event.preventDefault()}
-                          onDrop={(event) => handleDrop(event, qubit, column)}
-                        >
-                          {cell && (
-                            <div
-                              className={`placed-gate ${cell.pending ? "pending-gate" : ""} ${MULTI_QUBIT_GATES.has(cellGateName(cell)) || cellGateName(cell) === "ccx" ? "multi-gate" : ""}`}
-                              title={`${cellGateName(cell).toUpperCase()} on q${qubit}`}
-                            >
-                              {renderGate(cell)}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            ))}
-
-            <div className="cnot-connectors" aria-hidden="true">
-              {connectors.map((group) => {
-                const qubits = group.members.map((member) => member.qubit).sort((a, b) => a - b);
-                return (
-                  <span
-                    className="cnot-connector"
-                    key={group.id}
-                    style={{
-                      "--connector-column": group.column,
-                      "--connector-control": qubits[0],
-                      "--connector-span": qubits[qubits.length - 1] - qubits[0],
-                    }}
-                  />
-                );
-              })}
-            </div>
-          </div>
-
-          {gateCount === 0 && (
-            <div className="empty-circuit">
-              <div className="empty-icon"><Plus size={25} /></div>
-              <h3>Build your circuit</h3>
-              <p>Drag a gate to a slot or select one from the palette.</p>
-            </div>
-          )}
-        </div>
+        <QuantumCanvas
+          circuit={circuit}
+          selectedCell={selectedCell}
+          onCellClick={handleCellClick}
+          onDrop={handleDrop}
+          onDragOver={(event) => event.preventDefault()}
+          renderGate={renderGate}
+          multiQubitGates={MULTI_QUBIT_GATES}
+          view={view}
+          onViewChange={setView}
+          qasm={openQasm}
+          onAddQubit={addQubit}
+          onRemoveQubit={removeQubit}
+          canRemoveQubit={circuit.length > 1}
+          qubitCapReached={circuit.length >= MAX_QUBITS}
+        />
       </div>
 
+      <div className="composer-toolbar">
+        <ComposerAssistant circuit={createCircuitJSON(circuit)} />
+      </div>
       <SimulationResults result={simulationResult} />
       {simulationResult && (
         <div className="circuit-visualizations">
@@ -527,6 +615,7 @@ function CircuitLab() {
           <pre><code>{transpiled.qiskit_code}</code></pre>
         </section>
       )}
+      <QiskitConverter circuit={createCircuitJSON(circuit)} onImport={importQiskit} />
     </div>
   );
 }

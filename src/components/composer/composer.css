@@ -1,0 +1,18 @@
+.composer-code-panel { margin-top: 14px; padding: 17px; border: 1px solid #26384b; border-radius: 10px; background: linear-gradient(145deg, #101b27, #0b141e); }
+.composer-section-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.composer-section-heading h3 { display: flex; align-items: center; gap: 7px; margin: 5px 0 0; font-size: 15px; }
+.composer-code-actions { display: flex; gap: 8px; }
+.qiskit-editor { width: 100%; min-height: 170px; margin-top: 14px; padding: 14px; border: 1px solid #26384b; border-radius: 7px; resize: vertical; background: #080f17; color: #b8d8d0; font: 11px/1.6 "SFMono-Regular", Consolas, monospace; }
+.composer-inline-message { margin: 8px 0 0; color: #7f91a8; font-size: 11px; }
+.composer-assistant-trigger { display: inline-flex; align-items: center; gap: 7px; border: 1px solid #3e426d; border-radius: 9px; padding: 10px 13px; background: #171b2d; color: #c3c6ff; font-size: 12px; }
+.composer-drawer { position: fixed; z-index: 20; top: 0; right: 0; bottom: 0; width: min(360px, 100vw); display: flex; flex-direction: column; padding: 22px; border-left: 1px solid #30415a; background: #0b141e; box-shadow: -12px 0 35px #0008; }
+.composer-drawer-header { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 16px; border-bottom: 1px solid #26384b; }
+.composer-drawer-header h3 { margin: 5px 0 0; font-size: 17px; }
+.composer-drawer-header button { border: 0; background: transparent; color: #8d9bb0; }
+.composer-messages { display: grid; gap: 10px; overflow: auto; padding: 18px 0; }
+.composer-message { max-width: 90%; padding: 10px 12px; border-radius: 10px; color: #bac8d6; background: #132130; font-size: 12px; line-height: 1.5; }
+.composer-message.user { justify-self: end; color: #e5e7ff; background: #27305d; }
+.composer-chat-form { display: flex; gap: 8px; margin-top: auto; }
+.composer-chat-form input { min-width: 0; flex: 1; border: 1px solid #30445c; border-radius: 8px; padding: 10px; background: #0a111a; color: #dce7f4; }
+.composer-chat-form button { border: 0; border-radius: 8px; padding: 0 12px; background: #42d3b2; color: #071019; }
+@media (max-width: 650px) { .composer-section-heading { align-items: flex-start; flex-direction: column; } .composer-code-actions { width: 100%; } .composer-code-actions button { flex: 1; justify-content: center; } }
