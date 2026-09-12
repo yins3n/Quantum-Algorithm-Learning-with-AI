@@ -14,7 +14,6 @@ import {
 
 import Dashboard from "./pages/Dashboard";
 import Learn from "./pages/Learn";
-import CircuitLab from "./pages/CircuitLab";
 import Challenges from "./pages/Challenges";
 import Tutor from "./pages/Tutor";
 import ChallengeDetail from "./pages/ChallengeDetail";
@@ -23,6 +22,14 @@ import Progress from "./pages/Progress";
 import { getCurrentUserProfile } from "./services/user";
 import AIChatDrawer from "./components/AIChatDrawer";
 import "./App.css";
+
+
+function CircuitLabRedirect() {
+  useEffect(() => {
+    window.location.replace("/composer/index.html");
+  }, []);
+  return null;
+}
 
 
 function App() {
@@ -69,10 +76,10 @@ function App() {
               <span>Learn</span>
             </NavLink>
 
-            <NavLink to="/circuit-lab" className="nav-item">
+            <a className="nav-item" href="/composer/index.html">
               <CircuitBoard size={20} />
               <span>Circuit Lab</span>
-            </NavLink>
+            </a>
 
             <NavLink to="/challenges" className="nav-item">
               <Trophy size={20} />
@@ -134,9 +141,9 @@ function App() {
             />
 
             <Route
-  path="/circuit-lab"
-  element={<CircuitLab />}
-/>
+              path="/circuit-lab"
+              element={<CircuitLabRedirect />}
+            />
 
             <Route
               path="/challenges"

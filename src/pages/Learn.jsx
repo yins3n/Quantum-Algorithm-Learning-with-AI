@@ -49,9 +49,15 @@ function Learn() {
             <ul>
               {lesson.outcomes.map((outcome) => <li key={outcome}><CheckCircle2 size={15} />{outcome}</li>)}
             </ul>
-            <Link className="text-link" to={index === 1 ? "/circuit-lab" : "/challenges"}>
-              Open lab <ArrowRight size={15} />
-            </Link>
+            {index === 1 ? (
+              <a className="text-link" href="/composer/index.html">
+                Open lab <ArrowRight size={15} />
+              </a>
+            ) : (
+              <Link className="text-link" to="/challenges">
+                Open lab <ArrowRight size={15} />
+              </Link>
+            )}
           </article>
         ))}
       </div>

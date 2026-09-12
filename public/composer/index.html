@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Quantum Composer</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body data-page-theme="dark" data-gate-theme="default">
+  <header class="menubar">
+    <div class="brand">
+      <div class="logo-mark"></div>
+      <span>Quantum&nbsp;Composer</span>
+    </div>
+    <nav class="menus" id="menus">
+      <div class="menu">
+        <button class="menu-btn" data-menu="file">File</button>
+        <div class="menu-drop" id="menu-file">
+          <div class="menu-item-group">
+            <button class="menu-item" data-action="new-qasm3">New &mdash; QASM&nbsp;3</button>
+            <button class="menu-item" data-action="new-qasm2">New &mdash; QASM&nbsp;2</button>
+          </div>
+          <div class="menu-item-group">
+            <button class="menu-item" data-action="upload">Upload .qasm file</button>
+            <button class="menu-item" data-action="duplicate">Duplicate file</button>
+          </div>
+          <div class="menu-item-group">
+            <button class="menu-item" data-action="share">Share&hellip;</button>
+            <button class="menu-item" data-action="export-image">Export circuit image</button>
+            <button class="menu-item" data-action="save">Save file</button>
+            <input type="file" id="file-upload" accept=".qasm,.txt" hidden />
+          </div>
+        </div>
+      </div>
+      <div class="menu">
+        <button class="menu-btn" data-menu="edit">Edit</button>
+        <div class="menu-drop" id="menu-edit">
+          <div class="menu-item-group">
+            <button class="menu-item" data-action="undo">Undo <kbd>Ctrl+Z</kbd></button>
+            <button class="menu-item" data-action="redo">Redo <kbd>Shift+Ctrl+Z</kbd></button>
+          </div>
+          <div class="menu-item-group">
+            <button class="menu-item" data-action="cut">Cut <kbd>Ctrl+X</kbd></button>
+            <button class="menu-item" data-action="copy">Copy <kbd>Ctrl+C</kbd></button>
+            <button class="menu-item" data-action="paste">Paste <kbd>Ctrl+V</kbd></button>
+            <button class="menu-item" data-action="select-all">Select all <kbd>Ctrl+A</kbd></button>
+          </div>
+          <div class="menu-item-group">
+            <button class="menu-item" data-action="clear-circuit">Clear circuit</button>
+            <button class="menu-item" data-action="registers">Manage registers</button>
+            <button class="menu-item" data-action="clear-clip">Copy code to clipboard</button>
+          </div>
+        </div>
+      </div>
+      <div class="menu">
+        <button class="menu-btn" data-menu="view">View</button>
+        <div class="menu-drop" id="menu-view">
+          <div class="menu-item-group">
+            <label class="menu-item">
+              <span>Theme</span>
+              <select id="gate-theme-select">
+                <option value="default">Default (colored)</option>
+                <option value="monochrome">Monochrome</option>
+              </select>
+            </label>
+          </div>
+          <div class="menu-item-group">
+            <label class="menu-item check"><input type="checkbox" checked data-panel="graphical" /> Graphical editor</label>
+            <label class="menu-item check"><input type="checkbox" checked data-panel="code" /> Code editor</label>
+          </div>
+          <div class="menu-item-group">
+            <label class="menu-item check"><input type="checkbox" checked data-panel="statevector" /> Statevector</label>
+            <label class="menu-item check"><input type="checkbox" checked data-panel="probabilities" /> Probabilities</label>
+            <label class="menu-item check"><input type="checkbox" checked data-panel="qsphere" /> Q-sphere</label>
+          </div>
+          <div class="menu-item-group">
+            <label class="menu-item">
+              <span>Alignment</span>
+              <select id="align-select">
+                <option value="left">Left alignment</option>
+                <option value="freeform">Freeform alignment</option>
+                <option value="layers">Layers alignment</option>
+              </select>
+            </label>
+          </div>
+          <div class="menu-item-group">
+            <button class="menu-item" data-action="reset-workspace">Reset workspace</button>
+          </div>
+        </div>
+      </div>
+      <div class="menu">
+        <button class="menu-btn" data-menu="help">Help</button>
+        <div class="menu-drop" id="menu-help">
+          <div class="menu-item-group">
+            <button class="menu-item" data-action="help-first">Build your first circuit</button>
+          </div>
+          <div class="menu-item-group">
+            <button class="menu-item" data-action="help-features">Explore features</button>
+          </div>
+          <div class="menu-item-group">
+            <button class="menu-item" data-action="help-about">About this app</button>
+          </div>
+        </div>
+      </div>
+    </nav>
+    <div class="menubar-right">
+      <button class="btn ghost" id="page-theme-toggle" title="Toggle light/dark theme">Theme</button>
+    </div>
+  </header>
+
+  <header class="toolbar">
+    <div class="title-wrap">
+      <input id="circuit-name" class="title-input" value="Untitled circuit" spellcheck="false" />
+      <button class="btn ghost icon-btn" id="edit-name-btn" title="Edit name">&#9998;</button>
+    </div>
+    <div class="toolbar-spacer"></div>
+    <div class="toolbar-right">
+      <label class="code-format" title="Code language">
+        <span>Code format</span>
+        <select id="code-format">
+          <option value="qasm">OpenQASM</option>
+          <option value="qiskit">Qiskit (read-only)</option>
+        </select>
+      </label>
+      <button class="btn ghost" id="save-btn">Save file</button>
+      <button class="btn primary" id="run-btn">Set up and run</button>
+    </div>
+  </header>
+
+  <div class="workspace">
+    <!-- Left panel: gate catalog -->
+    <aside class="left-panel" id="left-panel">
+      <div class="panel-header">
+        <span class="panel-toggle" data-panel-toggle="left">&#9660;</span>
+        <h2>Gate catalog</h2>
+        <span class="panel-drag" title="Drag this panel">&hellip;</span>
+      </div>
+      <div class="panel-body">
+        <input id="gate-search" class="search-input" type="text" placeholder="Search gates..." />
+        <div id="gate-palette" class="gate-palette"></div>
+      </div>
+    </aside>
+
+    <!-- Center: circuit + code -->
+    <main class="center">
+      <section class="graphical-editor" id="graphical-editor">
+        <div class="editor-toolbar" id="editor-toolbar">
+          <span class="editor-toolbar-title">Circuit editor</span>
+          <div class="editor-tools-right">
+            <button class="btn ghost sm" id="add-qubit-btn">+&nbsp;Qubit</button>
+            <button class="btn ghost sm" id="remove-qubit-btn">&minus;&nbsp;Qubit</button>
+          </div>
+        </div>
+        <div class="canvas-scroll" id="canvas-scroll">
+          <svg id="circuit-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+        </div>
+      </section>
+      <section class="code-editor hidden" id="code-editor">
+        <div class="code-header" id="code-header">
+          <span class="panel-toggle" data-panel-toggle="code">&#9660;</span>
+          <span class="code-lang-label" id="code-lang-label">OpenQASM</span>
+          <span class="code-sync" id="code-sync">synced</span>
+        </div>
+        <textarea id="code-text" class="code-text" spellcheck="false"></textarea>
+      </section>
+    </main>
+
+    <!-- Right panel: visualizations -->
+    <aside class="right-panel" id="right-panel">
+      <div class="tabs" id="right-tabs">
+        <button class="tab" data-tab="statevector">Statevector</button>
+        <button class="tab" data-tab="probabilities">Probabilities</button>
+        <button class="tab" data-tab="qsphere">Q-sphere</button>
+      </div>
+      <div class="tab-panel" id="tab-statevector">
+        <div class="tab-head">
+          <h3>Statevector</h3>
+          <span class="panel-count" id="sv-count"></span>
+        </div>
+        <div class="tab-scroll">
+          <table class="sv-table" id="sv-table"></table>
+        </div>
+      </div>
+      <div class="tab-panel hidden" id="tab-probabilities">
+        <div class="tab-head">
+          <h3>Probabilities</h3>
+        </div>
+        <canvas id="prob-canvas" class="prob-canvas"></canvas>
+        <div class="prob-legend" id="prob-legend"></div>
+      </div>
+      <div class="tab-panel hidden" id="tab-qsphere">
+        <div class="tab-head">
+          <h3>Q-sphere</h3>
+          <span class="hint" id="qsphere-hint"></span>
+        </div>
+        <canvas id="qsphere-canvas" class="qsphere-canvas"></canvas>
+      </div>
+    </aside>
+  </div>
+
+  <!-- In-context gate info panel -->
+  <div class="gate-info hidden" id="gate-info">
+    <div class="gate-info-head">
+      <b id="gate-info-name">H</b>
+      <button class="gate-info-close" id="gate-info-close">&times;</button>
+    </div>
+    <div class="gate-info-body">
+      <p id="gate-info-desc"></p>
+      <div id="gate-info-params"></div>
+    </div>
+    <div class="gate-info-actions">
+      <button class="btn ghost sm" id="gate-info-delete">Delete</button>
+      <button class="btn ghost sm" id="gate-info-clone">Clone</button>
+    </div>
+  </div>
+
+  <!-- Run modal -->
+  <div class="modal-backdrop hidden" id="run-modal">
+    <div class="modal">
+      <div class="modal-head">
+        <h3>Set up and run</h3>
+        <button class="gate-info-close" id="run-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <label class="modal-label">Backend</label>
+        <select id="run-backend" class="modal-select">
+          <option value="qasm_simulator">ibm_simulator (built-in)</option>
+          <option value="aer">qasm_simulator (aer)</option>
+          <option value="fake">ibmq_test_device (simulated)</option>
+        </select>
+        <label class="modal-label">Number of shots</label>
+        <input id="run-shots" class="modal-select" type="number" value="1024" min="1" max="65536" step="1" />
+        <div class="run-result hidden" id="run-result">
+          <label class="modal-label">Results</label>
+          <div class="run-counts" id="run-counts"></div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn primary" id="run-start">Run circuit</button>
+        <button class="btn ghost" id="run-close2">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tour modal -->
+  <div class="modal-backdrop hidden" id="tour-modal">
+    <div class="modal">
+      <div class="modal-head"><h3 id="tour-title">Welcome</h3></div>
+      <div class="modal-body">
+        <p id="tour-text"></p>
+        <img id="tour-img" class="tour-img" alt="" />
+      </div>
+      <div class="modal-actions">
+        <button class="btn ghost" id="tour-prev">Back</button>
+        <button class="btn primary" id="tour-next">Next</button>
+      </div>
+    </div>
+  </div>
+
+  <textarea id="clipboard-buffer" class="hidden" readonly></textarea>
+
+  <script src="js/sim.js"></script>
+  <script src="js/qasm.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

@@ -20,10 +20,10 @@ function Dashboard() {
           <h1>Welcome back 👋</h1>
         </div>
 
-        <Link className="run-button" to="/circuit-lab">
+        <a className="run-button" href="/composer/index.html">
           <Play size={17} />
           Open Circuit Lab
-        </Link>
+        </a>
       </header>
 
       {/* HERO */}
@@ -78,14 +78,14 @@ function Dashboard() {
             <h3>Circuit Lab</h3>
 
             <p>
-              Build quantum circuits using an interactive
-              drag-and-drop canvas.
+              Build and run quantum circuits on an interactive
+              composer canvas.
             </p>
 
-            <Link to="/circuit-lab">
+            <a href="/composer/index.html">
               Build Circuit
               <ArrowRight size={16} />
-            </Link>
+            </a>
 
           </div>
 
