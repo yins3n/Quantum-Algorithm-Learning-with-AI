@@ -1,6 +1,6 @@
-import { getAccessToken } from "./user";
+import { getAccessToken } from "./user.js";
 
-const API_BASE_URL = (import.meta.env.VITE_QUANTUM_ENGINE_URL || "http://localhost:8000").replace(/\/$/, "");
+const API_BASE_URL = ((import.meta.env?.VITE_QUANTUM_ENGINE_URL) || "http://localhost:8000").replace(/\/$/, "");
 async function request(path, options = {}) {
   const token = getAccessToken();
   const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -24,8 +24,6 @@ export const api = {
   login: (payload) => request("/auth/login", { method: "POST", body: JSON.stringify(payload) }),
   me: () => request("/auth/me"),
   health: () => request("/health"),
-  simulate: (circuit) => request("/simulate", { method: "POST", body: JSON.stringify(circuit) }),
-  evaluate: (payload) => request("/evaluate", { method: "POST", body: JSON.stringify(payload) }),
   exercises: () => request("/exercises"),
   exercise: (id) => request(`/exercises/${encodeURIComponent(id)}`),
   submitExercise: (id, payload) => request(`/exercises/${encodeURIComponent(id)}/submit`, {
@@ -43,11 +41,5 @@ export const api = {
   saveCircuit: (id, name, circuit) => request(`/users/${encodeURIComponent(id)}/circuits`, {
     method: "POST",
     body: JSON.stringify({ user_id: id, name, circuit }),
-  }),
-  composer: (circuit) => request("/integrations/composer", { method: "POST", body: JSON.stringify(circuit) }),
-  transpile: (circuit) => request("/integrations/transpile", { method: "POST", body: JSON.stringify(circuit) }),
-  jupyter: (user_id, circuit, title = "Quantum learning exercise") => request("/integrations/jupyter", {
-    method: "POST",
-    body: JSON.stringify({ user_id, circuit, title }),
   }),
 };

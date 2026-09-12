@@ -31,17 +31,14 @@ real authentication and authorization integration.
 | Endpoint | Purpose |
 | --- | --- |
 | `POST /tutor` | Adaptive Granite tutor and circuit debugging |
+| `POST /api/ai/chat` | Global AI chat grounded by the validated tutor pipeline |
 | `GET /knowledge/search` | Search the trusted local quantum knowledge base |
 | `GET /users/{id}` | Learner preferences, skill state, and recent errors |
 | `PUT /users/{id}/preferences` | Persist learning preferences |
-| `POST /evaluate` | Validate submitted code syntax/safety, validate the circuit, and run Qiskit Aer when installed |
-| `POST /simulate` | Run a validated circuit with Qiskit Aer and return counts/probabilities |
 | `GET /health/ready` | Check database and simulator readiness (503 when unavailable) |
 | `GET /exercises` | List available CodeChef-style exercises |
 | `GET /exercises/{id}` | Load an exercise definition and its public checks |
 | `POST /exercises/{id}/submit` | Evaluate a learner circuit, score it, and record the attempt |
-| `POST /integrations/composer` | Convert the circuit to OpenQASM 3 for live Composer editing |
-| `POST /integrations/jupyter` | Return a downloadable `.ipynb` notebook |
 
 The shared circuit format is:
 
@@ -62,20 +59,10 @@ Supported gates include single-qubit gates (`h`, `x`, `y`, `z`, `i`, `s`,
 `cswap`), and `measure`. Parametric gates use a `params` array in radians;
 `rx`, `ry`, and `rz` take one value, `u`/`u3` take three, `u2` takes two,
 `u1` takes one, `r` takes two, and `cp`, `crx`, `cry`, and `crz` take one.
-The gate palette mirrors the IBM Quantum Composer categories: Operations,
-Pauli, Clifford, Rotation, Two-qubit, and Multi-qubit. Explicit
-measurements are supported only as terminal operations and map qubit
+Explicit measurements are supported only as terminal operations and map qubit
 `i` to classical bit `i`. Circuits without explicit measurements are
 measured automatically at the end; non-terminal or duplicate measurements
 are rejected.
-
-The Circuit Lab palette supports click-to-place and drag-and-drop placement.
-Multi-qubit gates are assembled in one time-step by placing the first qubit and
-then selecting the remaining wire(s); the selected-gate editor changes
-parameters for `rx`, `ry`, `rz`, `u`/`u1`/`u2`/`u3`, `r`, and `cp`/`crx`/
-`cry`/`crz`. The canvas toggles between the visual grid and an OpenQASM 3 code
-view. The lab serializes columns in time order and sends the resulting circuit
-directly to `POST /simulate`.
 
 The evaluator validates the circuit before simulation. It never treats an LLM
 response as mathematical truth. Qiskit Aer remains the source of simulator
@@ -84,9 +71,7 @@ The current evaluator establishes the CodeChef-style execution contract; a
 curriculum can add exercise-specific checks without changing the frontend
 integration. Exercise pass/fail is determined by circuit validation and
 Qiskit Aer results; Granite is not used as an evaluator.
-`POST /evaluate` requires at least one expected gate or probability check, so
-an empty `expected` object never reports success. If Aer is unavailable, no
-simulator result or passing score is fabricated.
+If Aer is unavailable, no simulator result or passing score is fabricated.
 
 ## Retrieval and reasoning
 
@@ -115,10 +100,9 @@ stores a signed bearer token locally. Login is available through
 exports require a matching token. Development mode can still use the
 `DEV_USER_IDS` compatibility boundary, but it must not be exposed publicly.
 
-The frontend also provides evaluator-backed progress at `/progress`, passes the
-last Circuit Lab circuit into the tutor workflow, and downloads notebooks from
-`POST /integrations/jupyter`. These features require the API URL configured in
-`VITE_QUANTUM_ENGINE_URL`.
+The frontend provides evaluator-backed progress at `/progress` and routes AI
+questions through `POST /api/ai/chat`. These features require the API URL
+configured in `VITE_QUANTUM_ENGINE_URL`.
 
 ## Production operations
 

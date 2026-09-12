@@ -22,7 +22,7 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
-from pydantic import AliasChoices, BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator
 from backend.rag import KnowledgeChunk, retrieve
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -122,33 +122,6 @@ class TutorResponse(BaseModel):
     sources: list[str] = Field(default_factory=list, max_length=3)
 
 
-class EvaluateRequest(BaseModel):
-    user_id: str = Field(min_length=1, max_length=128)
-    circuit: Circuit
-    expected: dict[str, Any] = Field(default_factory=dict, max_length=8)
-    source: str | None = Field(default=None, max_length=20000)
-
-
-class KernelExecuteRequest(BaseModel):
-    """A safe kernel request: circuits are simulated, source is only inspected."""
-
-    circuit: Circuit | None = None
-    source: str | None = Field(default=None, max_length=20000)
-    code: str | None = Field(default=None, max_length=20000)
-    expected: dict[str, Any] = Field(default_factory=dict, max_length=8)
-
-
-class ChallengeSubmission(BaseModel):
-    exercise_id: str = Field(
-        min_length=1,
-        max_length=128,
-        validation_alias=AliasChoices("exercise_id", "challenge_id"),
-    )
-    user_id: str = Field(min_length=1, max_length=128)
-    circuit: Circuit
-    source: str | None = Field(default=None, max_length=20000)
-
-
 class Exercise(BaseModel):
     id: str
     version: int = 1
@@ -164,12 +137,6 @@ class ExerciseSubmission(BaseModel):
     user_id: str = Field(min_length=1, max_length=128)
     circuit: Circuit
     source: str | None = Field(default=None, max_length=20000)
-
-
-class NotebookRequest(BaseModel):
-    user_id: str = Field(min_length=1, max_length=128)
-    circuit: Circuit
-    title: str = Field(default="Quantum learning exercise", max_length=200)
 
 
 class SavedCircuitRequest(BaseModel):
@@ -820,40 +787,6 @@ def tutor_context(request: TutorRequest, learner: dict[str, Any], errors: list[s
     )
 
 
-def qasm(circuit: Circuit) -> str:
-    lines = ["OPENQASM 3.0;", 'include "stdgates.inc";']
-    names = {gate.name.lower() for gate in circuit.gates}
-    if "sxdg" in names:
-        lines.append("gate sxdg q { s q; h q; s q; }")
-    if "ecr" in names:
-        lines.append("gate ecr q0, q1 { s q0; sx q1; cx q0, q1; x q0; }")
-    lines.append(f"bit[{circuit.num_qubits}] c;")
-    lines.append(f"qubit[{circuit.num_qubits}] q;")
-    for gate in circuit.gates:
-        name = gate.name.lower()
-        qubits = ",".join(f"q[{index}]" for index in gate.qubits)
-        if name == "measure":
-            lines.append(f"c[{gate.qubits[0]}] = measure q[{gate.qubits[0]}];")
-        elif name == "reset":
-            lines.append(f"reset q[{gate.qubits[0]}];")
-        elif name == "barrier":
-            lines.append(f"barrier {qubits};")
-        elif name == "i":
-            lines.append(f"id q[{gate.qubits[0]}];")
-        elif name == "u1":
-            lines.append(f"p({gate.params[0]}) q[{gate.qubits[0]}];")
-        elif name == "u2":
-            lines.append(f"U(pi/2, {gate.params[0]}, {gate.params[1]}) q[{gate.qubits[0]}];")
-        elif name in {"u", "u3"}:
-            lines.append(f"U({','.join(map(str, gate.params))}) q[{gate.qubits[0]}];")
-        elif name == "r":
-            lines.append(f"U({gate.params[0]}, -pi/2 + {gate.params[1]}, pi/2 - {gate.params[1]}) q[{gate.qubits[0]}];")
-        else:
-            params = f"({','.join(map(str, gate.params))})" if gate.params else ""
-            lines.append(f"{name}{params} {qubits};")
-    return "\n".join(lines)
-
-
 def safe_python_check(source: str) -> list[str]:
     """Check submitted code without executing untrusted Python."""
     try:
@@ -869,38 +802,6 @@ def safe_python_check(source: str) -> list[str]:
         if isinstance(node, ast.Attribute) and "__" in node.attr:
             issues.append("Dunder attribute access is not allowed.")
     return issues
-
-
-def validate_check_config(checks: dict[str, Any]) -> list[str]:
-    errors: list[str] = []
-    required_gates = checks.get("required_gates", [])
-    if not isinstance(required_gates, list) or any(
-        not isinstance(gate, str) or not gate.strip() for gate in required_gates
-    ):
-        errors.append("required_gates must be a list of non-empty gate names.")
-    elif len(required_gates) > MAX_CHECKS:
-        errors.append(f"required_gates may contain at most {MAX_CHECKS} items.")
-    probabilities = checks.get("probabilities", {})
-    if not isinstance(probabilities, dict):
-        errors.append("probabilities must be an object mapping states to numbers.")
-    else:
-        if len(probabilities) > MAX_CHECKS:
-            errors.append(f"probabilities may contain at most {MAX_CHECKS} states.")
-        for state, expected in probabilities.items():
-            if not isinstance(state, str) or not state:
-                errors.append("probability state names must be non-empty strings.")
-            if isinstance(expected, bool) or not isinstance(expected, (int, float)) or not math.isfinite(expected):
-                errors.append(f"Expected probability for '{state}' must be finite.")
-            elif expected < 0 or expected > 1:
-                errors.append(f"Expected probability for '{state}' must be between 0 and 1.")
-    tolerance = checks.get("tolerance", 0.01)
-    if isinstance(tolerance, bool) or not isinstance(tolerance, (int, float)) or not math.isfinite(tolerance):
-        errors.append("tolerance must be a finite number.")
-    elif tolerance < 0 or tolerance > 1:
-        errors.append("tolerance must be between 0 and 1.")
-    if not required_gates and not probabilities:
-        errors.append("at least one expected check is required.")
-    return errors
 
 
 def evaluate_checks(circuit: Circuit, simulation: dict[str, Any], checks: dict[str, Any]) -> list[dict[str, Any]]:
@@ -969,41 +870,6 @@ def submit_exercise(exercise: Exercise, request: ExerciseSubmission) -> dict[str
         "checks": checks,
         "feedback": feedback,
         "simulation": simulation,
-    }
-
-
-def execute_kernel(request: KernelExecuteRequest) -> dict[str, Any]:
-    """Validate and simulate the supported circuit DSL without running Python."""
-    source = request.source if request.source is not None else request.code
-    source_errors = safe_python_check(source) if source else []
-    circuit_errors = validate_circuit(request.circuit) if request.circuit else []
-    errors = [*source_errors, *circuit_errors]
-    simulation = simulate(request.circuit) if request.circuit and not errors else None
-
-    check_errors = validate_check_config(request.expected) if request.expected else []
-    malformed_checks = [
-        error for error in check_errors
-        if error != "at least one expected check is required."
-    ]
-    if malformed_checks:
-        raise HTTPException(status_code=422, detail=malformed_checks)
-    checks = (
-        evaluate_checks(request.circuit, simulation, request.expected)
-        if request.circuit and simulation and simulation.get("probabilities") is not None and not errors
-        else []
-    )
-    return {
-        "executed": bool(
-            request.circuit
-            and not errors
-            and simulation
-            and simulation.get("probabilities") is not None
-        ),
-        "validated_errors": errors,
-        "source_checked": source is not None,
-        "simulation": simulation,
-        "checks": checks,
-        "passed": bool(checks) and all(check["passed"] for check in checks),
     }
 
 
@@ -1111,25 +977,6 @@ def submit(
         raise HTTPException(status_code=404, detail="Exercise not found.")
     authenticated_user(request.user_id, authorization)
     return submit_exercise(exercise, request)
-
-
-@app.post("/api/challenges/submit")
-def submit_challenge(
-    request: ChallengeSubmission,
-    authorization: str | None = Header(default=None),
-) -> dict[str, Any]:
-    exercise = EXERCISES.get(request.exercise_id)
-    if exercise is None:
-        raise HTTPException(status_code=404, detail="Exercise not found.")
-    authenticated_user(request.user_id, authorization)
-    return submit_exercise(
-        exercise,
-        ExerciseSubmission(
-            user_id=request.user_id,
-            circuit=request.circuit,
-            source=request.source,
-        ),
-    )
 
 
 @app.get("/users/{user_id}")
@@ -1251,105 +1098,3 @@ def ai_chat(request: AIChatRequest, authorization: str | None = Header(default=N
         authorization,
     )
     return {"message": response["answer"], "context": response["learner_profile"]}
-
-
-@app.post("/evaluate")
-def evaluate(request: EvaluateRequest, authorization: str | None = Header(default=None)) -> dict[str, Any]:
-    authenticated_user(request.user_id, authorization)
-    errors = validate_circuit(request.circuit)
-    if request.source:
-        errors.extend(safe_python_check(request.source))
-    check_errors = validate_check_config(request.expected)
-    malformed_check_errors = [
-        error for error in check_errors
-        if error != "at least one expected check is required."
-    ]
-    if malformed_check_errors:
-        raise HTTPException(status_code=422, detail=malformed_check_errors)
-    simulation = simulate(request.circuit) if not errors else None
-    checks = (
-        evaluate_checks(request.circuit, simulation, request.expected)
-        if simulation and simulation.get("probabilities") is not None and not check_errors
-        else []
-    )
-    passed = (
-        not errors
-        and not check_errors
-        and bool(checks)
-        and all(check["passed"] for check in checks)
-    )
-    feedback = errors or [check["message"] for check in checks if not check["passed"]]
-    if not errors and check_errors:
-        feedback = check_errors
-    elif not errors and simulation and simulation.get("probabilities") is None:
-        feedback = [simulation.get("message", "Simulation unavailable; no score was assigned.")]
-    if not feedback:
-        feedback = ["All supplied checks passed."]
-    record_attempt(request.user_id, passed, feedback)
-    connection = db()
-    connection.execute("INSERT INTO attempts VALUES (?, ?, ?, ?, ?)", (str(uuid.uuid4()), request.user_id, int(passed), json.dumps(feedback), utc_now()))
-    connection.commit()
-    connection.close()
-    return {"passed": passed, "score": 100 if passed else 0, "checks": checks, "feedback": feedback, "simulation": simulation}
-
-
-@app.post("/simulate")
-@app.post("/api/quantum/simulate")
-def run_simulation(circuit: Circuit) -> dict[str, Any]:
-    errors = validate_circuit(circuit)
-    if errors:
-        raise HTTPException(status_code=422, detail=errors)
-    result = simulate(circuit)
-    if result.get("probabilities") is None:
-        raise HTTPException(status_code=503, detail=result.get("message", "Simulator unavailable."))
-    return result
-
-
-@app.post("/api/kernel/execute")
-def kernel_execute(request: KernelExecuteRequest) -> dict[str, Any]:
-    return execute_kernel(request)
-
-
-@app.post("/integrations/composer")
-def composer(circuit: Circuit) -> dict[str, Any]:
-    errors = validate_circuit(circuit)
-    if errors:
-        raise HTTPException(status_code=422, detail=errors)
-    return {"qasm": qasm(circuit), "format": "openqasm-3.0", "composer": "Paste the QASM into IBM Quantum Composer to continue editing live."}
-
-
-@app.post("/integrations/transpile")
-def transpile_circuit(circuit: Circuit) -> dict[str, Any]:
-    errors = validate_circuit(circuit)
-    if errors:
-        raise HTTPException(status_code=422, detail=errors)
-    try:
-        from qiskit import transpile as qiskit_transpile
-        from qiskit.qasm2 import dumps
-        qc = build_quantum_circuit(circuit, include_measurements=True)
-        transpiled = qiskit_transpile(qc, basis_gates=["u", "cx"], optimization_level=1)
-        transpiled_qasm = dumps(transpiled)
-        return {
-            "qiskit_code": (
-                "from qiskit import QuantumCircuit, transpile\n\n"
-                f"qc = QuantumCircuit.from_qasm_str({transpiled_qasm!r})\n"
-                "optimized = transpile(qc, basis_gates=['u', 'cx'], optimization_level=1)\n"
-                "optimized.draw('text')"
-            ),
-            "qasm": transpiled_qasm,
-            "original_gate_count": len(circuit.gates),
-            "transpiled_gate_count": len(transpiled.data),
-            "basis_gates": ["u", "cx"],
-        }
-    except (ImportError, KeyError, RuntimeError, ValueError) as error:
-        raise HTTPException(status_code=503, detail=f"Transpilation unavailable: {error}") from error
-
-
-@app.post("/integrations/jupyter")
-def jupyter(request: NotebookRequest, authorization: str | None = Header(default=None)) -> dict[str, Any]:
-    authenticated_user(request.user_id, authorization)
-    errors = validate_circuit(request.circuit)
-    if errors:
-        raise HTTPException(status_code=422, detail=errors)
-    code = f"""from qiskit import QuantumCircuit\nfrom qiskit_aer import AerSimulator\n\nqc = QuantumCircuit.from_qasm_str({qasm(request.circuit)!r})\nqc.draw('mpl')\nresult = AerSimulator().run(qc, shots=1024).result()\nresult.get_counts()\n"""
-    return {"metadata": {"title": request.title, "source": "quantum-learning-platform"}, "nbformat": 4, "nbformat_minor": 5, "cells": [{"cell_type": "markdown", "metadata": {}, "source": [f"# {request.title}\\n"]}, {"cell_type": "code", "execution_count": None, "metadata": {}, "outputs": [], "source": code.splitlines(True)}]}

@@ -23,40 +23,11 @@ class BackendRemediationTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.database_path.unlink(missing_ok=True)
 
-    def test_empty_expected_checks_are_not_a_success(self):
-        request = backend.EvaluateRequest(
-            user_id="demo-user",
-            circuit=backend.Circuit(num_qubits=1, shots=8),
-        )
-
-        result = backend.evaluate(request)
-
-        self.assertFalse(result["passed"])
-        self.assertEqual(result["score"], 0)
-        self.assertIn("at least one expected check is required.", result["feedback"])
-
     def test_non_finite_gate_parameters_are_rejected(self):
         with self.assertRaises(ValidationError):
             backend.Gate(name="rx", qubits=[0], params=[math.nan])
         with self.assertRaises(ValidationError):
             backend.Gate(name="rz", qubits=[0], params=[math.inf])
-
-    def test_non_finite_expected_values_are_rejected(self):
-        for expected in (
-            {"probabilities": {"0": math.inf}},
-            {"probabilities": {"0": 0.5}, "tolerance": math.inf},
-        ):
-            with self.subTest(expected=expected):
-                request = backend.EvaluateRequest(
-                    user_id="demo-user",
-                    circuit=backend.Circuit(num_qubits=1),
-                    expected=expected,
-                )
-
-                with self.assertRaises(HTTPException) as raised:
-                    backend.evaluate(request)
-
-                self.assertEqual(raised.exception.status_code, 422)
 
     def test_explicit_measurement_uses_stable_classical_output(self):
         circuit = backend.Circuit(
@@ -131,50 +102,6 @@ class BackendRemediationTests(unittest.TestCase):
         errors = backend.validate_circuit(circuit)
 
         self.assertTrue(any("measurements must be terminal" in error for error in errors))
-
-    def test_task_b_simulation_alias_uses_existing_validation(self):
-        paths = {route.path for route in backend.app.routes}
-        self.assertTrue({
-            "/api/quantum/simulate",
-            "/api/kernel/execute",
-            "/api/challenges/submit",
-        }.issubset(paths))
-
-        circuit = backend.Circuit(num_qubits=1, gates=[backend.Gate(name="x", qubits=[0])], shots=4)
-
-        result = backend.run_simulation(circuit)
-
-        self.assertIn("probabilities", result)
-        self.assertEqual(result["counts"], {"1": 4})
-
-    def test_task_b_kernel_does_not_execute_submitted_python(self):
-        result = backend.kernel_execute(
-            backend.KernelExecuteRequest(
-                source="import os\nos.system('echo unsafe')",
-                circuit=backend.Circuit(num_qubits=1),
-            )
-        )
-
-        self.assertFalse(result["executed"])
-        self.assertTrue(any("Imports are not allowed" in error for error in result["validated_errors"]))
-        self.assertIsNone(result["simulation"])
-
-    def test_task_c_challenge_submission_alias_evaluates_existing_exercise(self):
-        request = backend.ChallengeSubmission(
-            exercise_id="superposition",
-            user_id="demo-user",
-            circuit=backend.Circuit(
-                num_qubits=1,
-                gates=[backend.Gate(name="h", qubits=[0])],
-                shots=32,
-            ),
-        )
-
-        result = backend.submit_challenge(request)
-
-        self.assertEqual(result["exercise_id"], "superposition")
-        self.assertIn("checks", result)
-        self.assertTrue(result["passed"])
 
     def test_user_profiles_are_bounded_in_development_mode(self):
         with self.assertRaises(HTTPException) as raised:
